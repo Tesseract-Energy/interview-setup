@@ -28,14 +28,14 @@ files. It only looks at what's on your machine.
 **macOS / Linux**
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/<org>/interview-setup/<pinned-commit>/setup.sh -o setup.sh
+curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/1f4211f/setup.sh -o setup.sh
 bash setup.sh --check
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/<org>/interview-setup/<pinned-commit>/setup.ps1 -OutFile setup.ps1
+irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/1f4211f/setup.ps1 -OutFile setup.ps1
 powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check
 ```
 
