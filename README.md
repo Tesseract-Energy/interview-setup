@@ -66,9 +66,7 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1 <repo-url>
 ```
 
 This clones the repo, installs its dependencies, and asks you to paste the
-API key shared with you on the call (your typing won't be shown — that's
-expected). The key is written to a local `.env` file in the cloned repo and
-is never printed, logged, or sent anywhere else.
+API key shared with you on the call. Afterwards, it will be setup and ready to use.
 
 ## Troubleshooting
 
