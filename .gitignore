@@ -1,0 +1,5 @@
+.DS_Store
+*.swp
+
+# Internal planning doc - not for the public candidate-facing repo.
+/onboarding-automation-proposal.md
