@@ -28,21 +28,20 @@ files. It only looks at what's on your machine.
 **macOS / Linux**
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/87310c1/setup.sh -o setup.sh
-bash setup.sh --check
+curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/87310c1/setup.sh -o setup.sh && bash setup.sh --check
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/87310c1/setup.ps1 -OutFile setup.ps1
-powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check
+irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/87310c1/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check
 ```
 
-> We download the script first and run it as a second step on purpose,
-> rather than piping it straight into your shell, so you have the chance to
-> open and read it first. The link above points at one fixed, reviewable
-> version of the script (not a moving branch).
+> The script is saved to a file and run from there, rather than piped
+> straight into your shell, so it's sitting next to you afterwards if you
+> want to read what it did — and the link points at one fixed, reviewable
+> version (not a moving branch). To read it *before* running anything, drop
+> the `&& bash ...` part, open `setup.sh`, then run it yourself.
 
 If it prints `ready for the interview`, you're done. If it prints
 `fix the items above`, follow the fix listed next to each failed item and
@@ -50,47 +49,33 @@ run `--check` again.
 
 ## 2. On the day, once you've accepted the repo invite
 
-Run the same script again, this time with the interview repo's URL (you'll
-be given this separately):
+One command. Substitute the **claim code** and the **interview repo URL** you
+were given:
 
 **macOS / Linux**
 
 ```bash
-bash setup.sh <repo-url>
+curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/87310c1/setup.sh -o setup.sh && bash setup.sh --claim YOUR-CODE <repo-url>
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\setup.ps1 <repo-url>
+irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/87310c1/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Claim YOUR-CODE <repo-url>
 ```
 
-This clones the repo, installs its dependencies, and sets up the API key.
-Afterwards, it will be setup and ready to use.
+That clones the repo, installs its dependencies, fetches your API key and
+writes it to `.env`. Nothing to paste, and you're ready to use it.
 
-### The API key
+It re-downloads the script so this works whether or not you still have the
+copy from step 1.
 
-If you've been given a **claim code**, add it and the key is fetched for you —
-nothing to paste:
-
-**macOS / Linux**
-
-```bash
-bash setup.sh --claim YOUR-CODE <repo-url>
-```
-
-**Windows (PowerShell)**
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Claim YOUR-CODE <repo-url>
-```
-
-The code only works from a few minutes before your interview starts, and only
-once. If you run it earlier, it'll tell you what time to try again — that's
+**The claim code works from a few minutes before your interview starts, and
+only once.** Run it earlier and it tells you what time to try again — that's
 expected, not a problem with your setup.
 
-Without a claim code, the script asks you to paste the API key shared with you
-on the call instead.
+If you weren't given a claim code, drop the `--claim YOUR-CODE` part and the
+script will ask you to paste the API key shared with you on the call instead.
 
 ## Troubleshooting
 
