@@ -4,6 +4,9 @@
 # Clones the repo, checks/installs prerequisites, installs dependencies, then
 # asks you to paste the API key (input is hidden) and writes it to .env.
 #
+# Or fetch the key automatically with the claim code your interviewer gave you:
+#   bash setup.sh --claim ABCD-2345 <repo-url>
+#
 # Non-interactive alternative: ANTHROPIC_API_KEY=... bash setup.sh <repo-url>
 # Set KEY_NAME to use a different env var name (default: ANTHROPIC_API_KEY).
 #
@@ -23,6 +26,10 @@ Usage:
   bash setup.sh --check [--needs git,uv,node]
 
   <repo-url>        Clone this repo and set it up for the interview.
+  --claim CODE      Fetch your API key automatically using the claim code
+                     your interviewer gave you, instead of pasting a key.
+                     The code only works from shortly before your interview
+                     starts, and only once.
   --check           Verify your machine is ready. Never clones, never asks
                      for a key, never touches .env.
   --needs LIST      Comma-separated prerequisites to check (with --check).
@@ -35,10 +42,13 @@ EOF
 CHECK_MODE=0
 NEEDS=""
 REPO_URL=""
+CLAIM_CODE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) CHECK_MODE=1; shift ;;
+    --claim) CLAIM_CODE="${2:-}"; shift 2 ;;
+    --claim=*) CLAIM_CODE="${1#*=}"; shift ;;
     --needs) NEEDS="${2:-}"; shift 2 ;;
     --needs=*) NEEDS="${1#*=}"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -49,6 +59,9 @@ while [ $# -gt 0 ]; do
 done
 
 KEY_NAME="${KEY_NAME:-ANTHROPIC_API_KEY}"
+# Overridable so the service can be pointed at a local/staging instance while
+# testing, without editing the copy candidates download.
+CLAIM_URL="${CLAIM_URL:-https://onboarding-service-chi.vercel.app/api/claim}"
 
 if [ "$CHECK_MODE" = 0 ] && [ -z "$REPO_URL" ]; then
   usage >&2
@@ -348,6 +361,49 @@ fi
 
 # ---------- API key ----------
 API_KEY="${!KEY_NAME:-}"
+
+# With --claim, swap the code for the key instead of asking the candidate to
+# paste one. The service returns the key as the whole body on success, and a
+# human-readable explanation on any failure - including "your key unlocks at
+# HH:MM UTC" when setup is run before the interview window opens - so the
+# wording lives server-side and this script just prints what it's told.
+if [ -z "$API_KEY" ] && [ -n "$CLAIM_CODE" ]; then
+  have curl || die "This needs curl to fetch your key. Install curl, or ask your interviewer for the key to paste instead."
+  echo
+  echo "Fetching your API key with claim code $CLAIM_CODE ..."
+
+  # The key is kept in a shell variable and never written to a temp file -
+  # it only ever lands on disk in .env, where it's meant to be.
+  #
+  # No -f: it makes curl discard the response body on a 4xx, which is exactly
+  # the body carrying the explanation the candidate needs to read. The status
+  # is appended as a trailing line instead, and split back off below.
+  # --get/--data-urlencode so an odd character in the code can't break the URL.
+  CLAIM_RESPONSE="$(curl -sS -w $'\n%{http_code}' --max-time 30 \
+    --get --data-urlencode "code=${CLAIM_CODE}" \
+    "$CLAIM_URL" 2>/dev/null || true)"
+
+  CLAIM_STATUS="${CLAIM_RESPONSE##*$'\n'}"
+  CLAIM_BODY="${CLAIM_RESPONSE%$'\n'*}"
+
+  case "$CLAIM_STATUS" in
+    200)
+      API_KEY="$CLAIM_BODY"
+      echo "Key received automatically - nothing to paste."
+      ;;
+    000|"")
+      die "Couldn't reach the key service. Check your internet connection and re-run, or ask your interviewer for the key to paste instead."
+      ;;
+    *)
+      # 409 = too early (includes the unlock time), 410 = used or finished,
+      # 404 = unrecognised. The body already says which, in words written for
+      # the candidate, so print it as-is rather than second-guessing it.
+      printf '\n%s\n' "$CLAIM_BODY" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 if [ -z "$API_KEY" ]; then
   [ -n "$TTY" ] || die "No terminal available to ask for the key. Re-run with $KEY_NAME=... set."
   echo

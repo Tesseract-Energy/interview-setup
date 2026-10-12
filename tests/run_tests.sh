@@ -262,6 +262,111 @@ else
 fi
 
 echo
+echo "== --claim: fetching the key from the service =="
+
+# A stub claim service, so these tests never touch the real one. Mirrors the
+# contract api/claim.ts actually implements: the key as the entire body on
+# 200, a human-readable explanation plus a non-200 status on every refusal.
+CLAIM_PORT=18731
+CLAIM_DIR="$TMP_ROOT/claim"
+mkdir -p "$CLAIM_DIR"
+cat > "$CLAIM_DIR/server.py" <<'PY'
+import http.server, urllib.parse, sys
+
+CASES = {
+    "GOODCODE": (200, "sk-ant-api03-fetched-by-claim-code"),
+    "TOOEARLY": (409, "Your key unlocks at 14:55 UTC, just before your interview starts. Re-run this then.\n"),
+    "USEDCODE": (410, "That claim code has already been used. If you need the key again, ask your interviewer.\n"),
+    "NOSUCHCD": (404, "That claim code isn't recognised. Check it with your interviewer.\n"),
+}
+
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        code = (q.get("code") or [""])[0].upper().replace("-", "").replace(" ", "")
+        status, body = CASES.get(code, (404, "unknown\n"))
+        payload = body.encode()
+        self.send_response(status)
+        self.send_header("content-type", "text/plain; charset=utf-8")
+        self.send_header("content-length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+    def log_message(self, *a):
+        pass
+
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY
+
+CLAIM_PY="$(command -v python3 || command -v python || true)"
+if [ -z "$CLAIM_PY" ]; then
+  echo "  SKIP - no python available to run the stub claim service"
+else
+  "$CLAIM_PY" "$CLAIM_DIR/server.py" "$CLAIM_PORT" &
+  CLAIM_PID=$!
+  # Wait for it to accept connections rather than sleeping a fixed guess.
+  for _ in $(seq 1 50); do
+    curl -fsS -o /dev/null "http://127.0.0.1:$CLAIM_PORT/?code=GOODCODE" 2>/dev/null && break
+    sleep 0.1
+  done
+  CLAIM_URL_TEST="http://127.0.0.1:$CLAIM_PORT/"
+
+  # -- happy path: key fetched, written to .env, nothing pasted --
+  work="$TMP_ROOT/c1" && mkdir -p "$work" && cd "$work" || exit 1
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  status=$?
+  assert_eq "$status" "0" "--claim: exits 0 on a valid code"
+  assert_contains "$out" "Key received automatically" "--claim: says the key came automatically"
+  assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" \
+    "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "--claim: fetched key written to .env"
+  assert_not_contains "$out" "Paste your API key" "--claim: never prompts for a paste"
+  cd "$HERE" || exit 1
+
+  # -- the case this was built for: candidate runs setup before the window --
+  work="$TMP_ROOT/c2" && mkdir -p "$work" && cd "$work" || exit 1
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim TOOEARLY "$BARE_REPO" 2>&1)"
+  status=$?
+  assert_eq "$status" "1" "--claim too early: exits non-zero"
+  assert_contains "$out" "Your key unlocks at 14:55 UTC" "--claim too early: shows the unlock time from the service"
+  assert_not_contains "$(cat "$work/fixture/.env" 2>/dev/null)" "sk-ant" "--claim too early: writes no key to .env"
+  cd "$HERE" || exit 1
+
+  # -- already used / unrecognised: the service's wording is passed through --
+  work="$TMP_ROOT/c3" && mkdir -p "$work" && cd "$work" || exit 1
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim USEDCODE "$BARE_REPO" 2>&1)"
+  assert_contains "$out" "already been used" "--claim used: passes the service's message through"
+  cd "$HERE" || exit 1
+
+  work="$TMP_ROOT/c4" && mkdir -p "$work" && cd "$work" || exit 1
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim NOSUCHCD "$BARE_REPO" 2>&1)"
+  assert_contains "$out" "isn't recognised" "--claim unknown: passes the service's message through"
+  cd "$HERE" || exit 1
+
+  # -- lowercase/hyphenated as a candidate would actually type it --
+  work="$TMP_ROOT/c5" && mkdir -p "$work" && cd "$work" || exit 1
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim "good-code" "$BARE_REPO" 2>&1)"
+  assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" \
+    "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "--claim: lowercase and hyphenated code still works"
+  cd "$HERE" || exit 1
+
+  # -- an explicit key beats --claim, so the manual path still works --
+  work="$TMP_ROOT/c6" && mkdir -p "$work" && cd "$work" || exit 1
+  out="$(ANTHROPIC_API_KEY=explicit-wins CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \
+    bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" "ANTHROPIC_API_KEY=explicit-wins" \
+    "--claim: an explicitly supplied key takes precedence"
+  cd "$HERE" || exit 1
+
+  kill "$CLAIM_PID" 2>/dev/null
+  wait "$CLAIM_PID" 2>/dev/null
+fi
+
+# -- service unreachable: a clear message, not a stack trace or a hang --
+work="$TMP_ROOT/c7" && mkdir -p "$work" && cd "$work" || exit 1
+out="$(CLAIM_URL="http://127.0.0.1:1/" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+assert_contains "$out" "Couldn't reach the key service" "--claim unreachable: explains the connection failure"
+cd "$HERE" || exit 1
+
+echo
 echo "== shellcheck =="
 if command -v shellcheck >/dev/null 2>&1; then
   if shellcheck "$SETUP"; then ok "shellcheck: no findings on setup.sh"; else fail "shellcheck: findings on setup.sh"; fi
