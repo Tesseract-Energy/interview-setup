@@ -14,7 +14,8 @@
 param(
     [Parameter(Position = 0)][string]$RepoUrl,
     [switch]$Check,
-    [string]$Needs
+    [string]$Needs,
+    [string]$Claim
 )
 
 $ErrorActionPreference = 'Stop'
@@ -254,6 +255,61 @@ if (Test-Path 'package.json') {
 
 # ---------- API key ----------
 $apiKey = [Environment]::GetEnvironmentVariable($keyName)
+
+# With -Claim, swap the code for the key rather than asking for a paste. The
+# service returns the key as the whole body on success and a human-readable
+# explanation on refusal (including "your key unlocks at HH:MM UTC" when run
+# before the interview window opens), so the wording stays server-side and
+# this script just prints what it's told.
+if ([string]::IsNullOrWhiteSpace($apiKey) -and -not [string]::IsNullOrWhiteSpace($Claim)) {
+    Write-Host ""
+    Write-Host "Fetching your API key with claim code $Claim ..."
+    $claimUrl = if ($env:CLAIM_URL) { $env:CLAIM_URL } else { 'https://onboarding-service-chi.vercel.app/api/claim' }
+    $uri = "$claimUrl`?code=$([Uri]::EscapeDataString($Claim))"
+
+    # No -SkipHttpErrorCheck: that's PowerShell 7+ only, and the README tells
+    # candidates to run this with `powershell` (Windows PowerShell 5.1), where
+    # it's an unknown-parameter error. Instead let a 4xx throw and dig the
+    # response body out of the exception, which differs between the two
+    # versions - 5.1 exposes a readable stream, 7 puts it in ErrorDetails.
+    $claimStatus = 0
+    $claimBody = ''
+    try {
+        $resp = Invoke-WebRequest -Uri $uri -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
+        $claimStatus = [int]$resp.StatusCode
+        $claimBody = $resp.Content
+    } catch {
+        $webResponse = $_.Exception.Response
+        if ($null -eq $webResponse) {
+            # No response at all - DNS, connection refused, timeout.
+            Fail "Couldn't reach the key service. Check your internet connection and re-run, or ask your interviewer for the key to paste instead."
+        }
+        $claimStatus = [int]$webResponse.StatusCode
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+            $claimBody = $_.ErrorDetails.Message          # PowerShell 7
+        } else {
+            try {                                          # Windows PowerShell 5.1
+                $reader = New-Object System.IO.StreamReader($webResponse.GetResponseStream())
+                $claimBody = $reader.ReadToEnd()
+                $reader.Close()
+            } catch { $claimBody = '' }
+        }
+    }
+
+    if ($claimStatus -eq 200) {
+        $apiKey = $claimBody
+        Write-Host "Key received automatically - nothing to paste."
+    } else {
+        # 409 = too early, 410 = used or finished, 404 = unrecognised.
+        if ([string]::IsNullOrWhiteSpace($claimBody)) {
+            $claimBody = "The key service refused the claim code (HTTP $claimStatus). Ask your interviewer for the key to paste instead."
+        }
+        Write-Host ""
+        Write-Host $claimBody.Trim() -ForegroundColor Yellow
+        exit 1
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($apiKey)) {
     Write-Host ""
     Write-Host "Paste your API key and press Enter (nothing will appear as you paste - that's normal)."

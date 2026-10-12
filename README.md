@@ -65,8 +65,32 @@ bash setup.sh <repo-url>
 powershell -ExecutionPolicy Bypass -File .\setup.ps1 <repo-url>
 ```
 
-This clones the repo, installs its dependencies, and asks you to paste the
-API key shared with you on the call. Afterwards, it will be setup and ready to use.
+This clones the repo, installs its dependencies, and sets up the API key.
+Afterwards, it will be setup and ready to use.
+
+### The API key
+
+If you've been given a **claim code**, add it and the key is fetched for you —
+nothing to paste:
+
+**macOS / Linux**
+
+```bash
+bash setup.sh --claim YOUR-CODE <repo-url>
+```
+
+**Windows (PowerShell)**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Claim YOUR-CODE <repo-url>
+```
+
+The code only works from a few minutes before your interview starts, and only
+once. If you run it earlier, it'll tell you what time to try again — that's
+expected, not a problem with your setup.
+
+Without a claim code, the script asks you to paste the API key shared with you
+on the call instead.
 
 ## Troubleshooting
 
