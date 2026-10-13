@@ -28,13 +28,13 @@ files. It only looks at what's on your machine.
 **macOS / Linux**
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/87310c1/setup.sh -o setup.sh && bash setup.sh --check
+curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9b61d05/setup.sh -o setup.sh && bash setup.sh --check
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/87310c1/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check
+irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9b61d05/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check
 ```
 
 > The script is saved to a file and run from there, rather than piped
@@ -55,13 +55,13 @@ were given:
 **macOS / Linux**
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/87310c1/setup.sh -o setup.sh && bash setup.sh --claim YOUR-CODE <repo-url>
+curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9b61d05/setup.sh -o setup.sh && bash setup.sh --claim YOUR-CODE <repo-url>
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/87310c1/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Claim YOUR-CODE <repo-url>
+irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9b61d05/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Claim YOUR-CODE <repo-url>
 ```
 
 That clones the repo, installs its dependencies, fetches your API key and
