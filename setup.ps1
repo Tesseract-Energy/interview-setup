@@ -271,6 +271,13 @@ if ([string]::IsNullOrWhiteSpace($apiKey) -and -not [string]::IsNullOrWhiteSpace
     }
 
     if ($claimStatus -eq 200) {
+        # Don't trust a 200 to mean "this is a key". A captive portal or an
+        # intercepting corporate proxy will happily return HTML with a 200, and
+        # writing that into .env fails much later as a confusing auth error.
+        $claimBody = ($claimBody -replace '\s', '')
+        if (-not $claimBody.StartsWith('sk-ant-')) {
+            Fail "The key service replied, but not with a key. You may be behind a proxy or captive portal that intercepted the request. Check your network and re-run, or ask your interviewer for the key to paste instead."
+        }
         $apiKey = $claimBody
         Write-Host "Key received automatically - nothing to paste."
     } else {

@@ -47,9 +47,16 @@ CLAIM_CODE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) CHECK_MODE=1; shift ;;
-    --claim) CLAIM_CODE="${2:-}"; shift 2 ;;
+    # The value is checked before shifting: with the flag last, `shift 2` fails
+    # and set -e kills the script with no output at all, so a typo'd command
+    # told the candidate nothing.
+    --claim) CLAIM_CODE="${2:-}"
+             [ -n "$CLAIM_CODE" ] || die "--claim needs your claim code after it, e.g. --claim ABCD-2345"
+             shift 2 ;;
     --claim=*) CLAIM_CODE="${1#*=}"; shift ;;
-    --needs) NEEDS="${2:-}"; shift 2 ;;
+    --needs) NEEDS="${2:-}"
+             [ -n "$NEEDS" ] || die "--needs needs a comma-separated list after it, e.g. --needs git,uv"
+             shift 2 ;;
     --needs=*) NEEDS="${1#*=}"; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
@@ -358,6 +365,16 @@ if [ -z "$API_KEY" ] && [ -n "$CLAIM_CODE" ]; then
 
   case "$CLAIM_STATUS" in
     200)
+      # Don't trust a 200 to mean "this is a key". A captive portal or an
+      # intercepting corporate proxy will happily return HTML with a 200, and
+      # writing that into .env fails much later as a confusing auth error.
+      CLAIM_BODY="$(printf '%s' "$CLAIM_BODY" | tr -d '[:space:]')"
+      case "$CLAIM_BODY" in
+        sk-ant-*) ;;
+        *)
+          die "The key service replied, but not with a key. You may be behind a proxy or captive portal that intercepted the request. Check your network and re-run, or ask your interviewer for the key to paste instead."
+          ;;
+      esac
       API_KEY="$CLAIM_BODY"
       echo "Key received automatically - nothing to paste."
       ;;
