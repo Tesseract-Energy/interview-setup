@@ -348,6 +348,49 @@ else
     "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "--claim: lowercase and hyphenated code still works"
   cd "$HERE" || exit 1
 
+  # -- a failed claim must leave nothing on disk: the code is single-use, so a
+  # half-cloned directory plus a burned code leaves the candidate stuck --
+  work="$TMP_ROOT/c8" && mkdir -p "$work" && cd "$work" || exit 1
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim TOOEARLY "$BARE_REPO" 2>&1)"
+  if [ -e "$work/fixture" ]; then
+    fail "--claim too early: must not clone before the key is in hand (found $work/fixture)"
+  else
+    ok "--claim too early: nothing cloned, nothing left behind"
+  fi
+  assert_not_contains "$out" "Cloning into" "--claim too early: clone never started"
+  cd "$HERE" || exit 1
+
+  # -- and the retry with a good code then works from the same directory --
+  work="$TMP_ROOT/c9" && mkdir -p "$work" && cd "$work" || exit 1
+  CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim NOSUCHCD "$BARE_REPO" >/dev/null 2>&1
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  assert_contains "$out" "Setup complete" "retry after a failed claim succeeds"
+  assert_not_contains "$out" "already exists" "retry after a failed claim: no 'already exists' error"
+  assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" \
+    "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "retry after a failed claim writes the key"
+  cd "$HERE" || exit 1
+
+  # -- re-running over an existing clone reuses it instead of dying --
+  work="$TMP_ROOT/c10" && mkdir -p "$work" && cd "$work" || exit 1
+  CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" >/dev/null 2>&1
+  echo "candidate work in progress" > "$work/fixture/MY_NOTES.txt"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  assert_contains "$out" "reusing it instead of cloning again" "second run reuses the existing clone"
+  assert_contains "$out" "Setup complete" "second run completes"
+  if [ -f "$work/fixture/MY_NOTES.txt" ]; then
+    ok "second run preserves the candidate's own files"
+  else
+    fail "second run preserves the candidate's own files"
+  fi
+  cd "$HERE" || exit 1
+
+  # -- a non-clone directory in the way gets a clear message, not a git error --
+  work="$TMP_ROOT/c11" && mkdir -p "$work/fixture" && cd "$work" || exit 1
+  echo "not a clone" > "$work/fixture/stray.txt"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  assert_contains "$out" "isn't a git clone" "a non-clone directory in the way is explained"
+  cd "$HERE" || exit 1
+
   # -- an explicit key beats --claim, so the manual path still works --
   work="$TMP_ROOT/c6" && mkdir -p "$work" && cd "$work" || exit 1
   out="$(ANTHROPIC_API_KEY=explicit-wins CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \

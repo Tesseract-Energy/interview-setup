@@ -223,37 +223,11 @@ if (-not (Have 'git')) {
     }
 }
 
-# ---------- clone ----------
-$repoDir = [System.IO.Path]::GetFileName($RepoUrl.TrimEnd('/', '\'))
-if ($repoDir.EndsWith('.git')) { $repoDir = $repoDir.Substring(0, $repoDir.Length - 4) }
-
-git clone $RepoUrl $repoDir
-Check-Exit "git clone"
-Set-Location $repoDir
-
-# ---------- repo-specific prerequisites + dependencies ----------
-if (Test-Path 'pyproject.toml') {
-    if (-not (Have 'uv')) {
-        if (-not (Try-InstallUv)) { Fail "Please install uv (https://docs.astral.sh/uv/) and re-run." }
-    }
-    uv sync
-    Check-Exit "uv sync"
-} elseif (Test-Path 'requirements.txt') {
-    $py = Get-PythonCommand
-    if (-not $py) { Fail "Python 3 is not installed. Install it from https://www.python.org/downloads/ and re-run." }
-    & $py -m pip install -r requirements.txt
-    Check-Exit "pip install"
-}
-
-if (Test-Path 'package.json') {
-    if (-not (Have 'npm')) { Fail "This repo needs Node.js/npm. Install from https://nodejs.org and re-run." }
-    if ((Test-Path 'pnpm-lock.yaml') -and (Have 'pnpm')) { pnpm install }
-    elseif ((Test-Path 'yarn.lock') -and (Have 'yarn')) { yarn install }
-    else { npm install }
-    Check-Exit "dependency install"
-}
-
-# ---------- API key ----------
+# ---------- API key (before the clone, on purpose) ----------
+# A claim code is single-use. Cloning first meant a wrong or too-early code
+# left a half-built directory behind, so the retry died on "destination path
+# already exists" - and with a burned code there was nothing left to retry
+# with. Nothing touches the disk until the key is in hand.
 $apiKey = [Environment]::GetEnvironmentVariable($keyName)
 
 # With -Claim, swap the code for the key rather than asking for a paste. The
@@ -321,6 +295,47 @@ if ([string]::IsNullOrWhiteSpace($apiKey)) {
 $apiKey = ($apiKey -replace '\s', '')
 if ([string]::IsNullOrEmpty($apiKey)) { Fail "No key entered. Re-run the script and paste the key when asked." }
 Write-Host "Key received ($($apiKey.Length) characters)."
+
+# ---------- clone ----------
+$repoDir = [System.IO.Path]::GetFileName($RepoUrl.TrimEnd('/', '\'))
+if ($repoDir.EndsWith('.git')) { $repoDir = $repoDir.Substring(0, $repoDir.Length - 4) }
+
+# Reuse an existing checkout rather than failing. A candidate who re-runs this
+# - after a failed claim, a dropped connection, or just twice - would otherwise
+# hit "destination path already exists" and be stuck. Never deletes it: by the
+# second run it may hold their work.
+if (Test-Path (Join-Path $repoDir '.git')) {
+    Write-Host "Found an existing $repoDir - reusing it instead of cloning again."
+    Set-Location $repoDir
+} elseif (Test-Path $repoDir) {
+    Fail "'$repoDir' already exists here but isn't a git clone. Move or rename it, then re-run."
+} else {
+    git clone $RepoUrl $repoDir
+    Check-Exit "git clone"
+    Set-Location $repoDir
+}
+
+# ---------- repo-specific prerequisites + dependencies ----------
+if (Test-Path 'pyproject.toml') {
+    if (-not (Have 'uv')) {
+        if (-not (Try-InstallUv)) { Fail "Please install uv (https://docs.astral.sh/uv/) and re-run." }
+    }
+    uv sync
+    Check-Exit "uv sync"
+} elseif (Test-Path 'requirements.txt') {
+    $py = Get-PythonCommand
+    if (-not $py) { Fail "Python 3 is not installed. Install it from https://www.python.org/downloads/ and re-run." }
+    & $py -m pip install -r requirements.txt
+    Check-Exit "pip install"
+}
+
+if (Test-Path 'package.json') {
+    if (-not (Have 'npm')) { Fail "This repo needs Node.js/npm. Install from https://nodejs.org and re-run." }
+    if ((Test-Path 'pnpm-lock.yaml') -and (Have 'pnpm')) { pnpm install }
+    elseif ((Test-Path 'yarn.lock') -and (Have 'yarn')) { yarn install }
+    else { npm install }
+    Check-Exit "dependency install"
+}
 
 # ---------- .env ----------
 if ((Test-Path '.env.example') -and -not (Test-Path '.env')) {

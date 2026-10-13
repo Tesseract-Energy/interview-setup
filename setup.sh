@@ -325,41 +325,11 @@ have git || try_install_git || die "git is not installed. Install it from https:
 "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' \
   || die "Python 3.8+ is required to run this script."
 
-# ---------- clone ----------
-REPO_DIR="$(basename "${REPO_URL%/}")"
-REPO_DIR="${REPO_DIR%.git}"
-
-git clone "$REPO_URL" "$REPO_DIR"
-cd "$REPO_DIR"
-
-# ---------- repo-specific prerequisites ----------
-if [ -f pyproject.toml ]; then
-  have uv || try_install_uv || die "Please install uv (https://docs.astral.sh/uv/) and re-run."
-fi
-
-if [ "$OS" = "Linux" ] && grep -rIlq --include='*.py' -E '^\s*(import tkinter|from tkinter|import Tkinter)' . 2>/dev/null; then
-  if ! "$PY" -c 'import tkinter' >/dev/null 2>&1; then
-    echo
-    echo "This repo uses tkinter for a manual-testing tool, but it isn't available for $PY."
-    try_install_tkinter || echo "Continuing without it - install later if you need that tool."
-    echo
-  fi
-fi
-
-# ---------- install dependencies ----------
-if [ -f pyproject.toml ]; then
-  uv sync
-elif [ -f requirements.txt ]; then
-  "$PY" -m pip install -r requirements.txt
-fi
-if [ -f package.json ]; then
-  if   [ -f pnpm-lock.yaml ] && have pnpm; then pnpm install
-  elif [ -f yarn.lock ]      && have yarn; then yarn install
-  else have npm || die "This repo needs Node.js/npm. Install from https://nodejs.org and re-run."; npm install
-  fi
-fi
-
-# ---------- API key ----------
+# ---------- API key (before the clone, on purpose) ----------
+# A claim code is single-use. Cloning first meant a wrong or too-early code
+# left a half-built directory behind, so the retry died on "destination path
+# already exists" - and with a burned code there was nothing left to retry
+# with. Nothing touches the disk until the key is in hand.
 API_KEY="${!KEY_NAME:-}"
 
 # With --claim, swap the code for the key instead of asking the candidate to
@@ -415,6 +385,51 @@ fi
 API_KEY="$(printf '%s' "$API_KEY" | tr -d '[:space:]')"
 [ -n "$API_KEY" ] || die "No key entered. Re-run the script and paste the key when asked."
 echo "Key received (${#API_KEY} characters)."
+
+# ---------- clone ----------
+REPO_DIR="$(basename "${REPO_URL%/}")"
+REPO_DIR="${REPO_DIR%.git}"
+
+# Reuse an existing checkout rather than failing. A candidate who re-runs this
+# - after a failed claim, a dropped connection, or just twice - would otherwise
+# hit "destination path already exists" and be stuck. Never deletes it: by the
+# second run it may hold their work.
+if [ -d "$REPO_DIR/.git" ]; then
+  echo "Found an existing $REPO_DIR - reusing it instead of cloning again."
+  cd "$REPO_DIR"
+elif [ -e "$REPO_DIR" ]; then
+  die "'$REPO_DIR' already exists here but isn't a git clone. Move or rename it, then re-run."
+else
+  git clone "$REPO_URL" "$REPO_DIR"
+  cd "$REPO_DIR"
+fi
+
+# ---------- repo-specific prerequisites ----------
+if [ -f pyproject.toml ]; then
+  have uv || try_install_uv || die "Please install uv (https://docs.astral.sh/uv/) and re-run."
+fi
+
+if [ "$OS" = "Linux" ] && grep -rIlq --include='*.py' -E '^\s*(import tkinter|from tkinter|import Tkinter)' . 2>/dev/null; then
+  if ! "$PY" -c 'import tkinter' >/dev/null 2>&1; then
+    echo
+    echo "This repo uses tkinter for a manual-testing tool, but it isn't available for $PY."
+    try_install_tkinter || echo "Continuing without it - install later if you need that tool."
+    echo
+  fi
+fi
+
+# ---------- install dependencies ----------
+if [ -f pyproject.toml ]; then
+  uv sync
+elif [ -f requirements.txt ]; then
+  "$PY" -m pip install -r requirements.txt
+fi
+if [ -f package.json ]; then
+  if   [ -f pnpm-lock.yaml ] && have pnpm; then pnpm install
+  elif [ -f yarn.lock ]      && have yarn; then yarn install
+  else have npm || die "This repo needs Node.js/npm. Install from https://nodejs.org and re-run."; npm install
+  fi
+fi
 
 # ---------- .env ----------
 if [ -f .env.example ] && [ ! -f .env ]; then
