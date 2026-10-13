@@ -28,20 +28,49 @@ files. It only looks at what's on your machine.
 **macOS / Linux**
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9b61d05/setup.sh -o setup.sh && bash setup.sh --check
+curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/c763072/setup.sh -o setup.sh && bash setup.sh --check
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9b61d05/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check
+irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/c763072/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check
 ```
 
 > The script is saved to a file and run from there, rather than piped
 > straight into your shell, so it's sitting next to you afterwards if you
 > want to read what it did — and the link points at one fixed, reviewable
-> version (not a moving branch). To read it *before* running anything, drop
-> the `&& bash ...` part, open `setup.sh`, then run it yourself.
+> version (not a moving branch).
+
+### Checking it before you run it
+
+You're being asked to run a script from a company you don't work for yet. All
+of these are reasonable, and none of them need our help:
+
+**Read it in your browser first** — no download needed. The links above are
+permalinks to one fixed commit, so what you read is exactly what you'd run:
+[setup.sh](https://github.com/Tesseract-Energy/interview-setup/blob/c763072/setup.sh)
+· [setup.ps1](https://github.com/Tesseract-Energy/interview-setup/blob/c763072/setup.ps1)
+
+**Download, read, then run** — drop the `&& bash ...` half of the command,
+open the file in any editor, and run it yourself when you're satisfied.
+
+**Check what you downloaded is what we published.** If these don't match, do
+not run it — tell your interviewer. (A corporate proxy that rewrites downloads
+is a more likely cause than anything sinister, but either way it's worth
+knowing.)
+
+```bash
+shasum -a 256 setup.sh     # expect 0f7c85cdea18c6df1625705be56748fc3c85a71b1b604c863edd956e19246c43
+shasum -a 256 setup.ps1    # expect b2e817e07ead3bc0d5b7758877cb5ea029b9166701dce294d9ed5f8bbd86cacf
+```
+
+On Windows PowerShell: `Get-FileHash setup.ps1 -Algorithm SHA256`
+
+**Run the harmless mode first.** `--check` only looks at what's installed on
+your machine: it never clones anything, never asks for a key, and never writes
+a file. That's step 1 below, and it's a safe way to see the script work before
+the real run.
 
 If it prints `ready for the interview`, you're done. If it prints
 `fix the items above`, follow the fix listed next to each failed item and
@@ -55,13 +84,13 @@ were given:
 **macOS / Linux**
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9b61d05/setup.sh -o setup.sh && bash setup.sh --claim YOUR-CODE <repo-url>
+curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/c763072/setup.sh -o setup.sh && bash setup.sh --claim YOUR-CODE <repo-url>
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9b61d05/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Claim YOUR-CODE <repo-url>
+irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/c763072/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Claim YOUR-CODE <repo-url>
 ```
 
 That clones the repo, installs its dependencies, fetches your API key and
