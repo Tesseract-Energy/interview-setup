@@ -421,6 +421,35 @@ else
   cd "$REPO_DIR"
 fi
 
+# ---------- .env (before installing, on purpose) ----------
+# A claim code is single-use, so it's spent by the time we get here. If the
+# dependency install below failed first, the key would be gone with nothing
+# written, and the retry couldn't fetch it again - the candidate would need
+# someone to read it to them. Getting it onto disk first makes a failed
+# install a retryable annoyance instead.
+if [ -f .env.example ] && [ ! -f .env ]; then
+  cp .env.example .env
+fi
+touch .env
+
+# The key goes to Python through the environment, never the command line
+SETUP_KEY_NAME="$KEY_NAME" SETUP_KEY_VALUE="$API_KEY" "$PY" - <<'PY'
+import os, re
+
+name, value = os.environ["SETUP_KEY_NAME"], os.environ["SETUP_KEY_VALUE"]
+pat = re.compile(r"\s*(?:export\s+)?" + re.escape(name) + r"\s*=")
+
+with open(".env") as f:
+    lines = [l for l in f.read().splitlines() if not pat.match(l)]
+lines.append(f"{name}={value}")
+
+with open(".env", "w") as f:
+    f.write("\n".join(lines) + "\n")
+PY
+chmod 600 .env 2>/dev/null || true
+
+echo "Setup complete. Project is in $(pwd)"
+
 # ---------- repo-specific prerequisites ----------
 if [ -f pyproject.toml ]; then
   have uv || try_install_uv || die "Please install uv (https://docs.astral.sh/uv/) and re-run."
@@ -448,26 +477,3 @@ if [ -f package.json ]; then
   fi
 fi
 
-# ---------- .env ----------
-if [ -f .env.example ] && [ ! -f .env ]; then
-  cp .env.example .env
-fi
-touch .env
-
-# The key goes to Python through the environment, never the command line
-SETUP_KEY_NAME="$KEY_NAME" SETUP_KEY_VALUE="$API_KEY" "$PY" - <<'PY'
-import os, re
-
-name, value = os.environ["SETUP_KEY_NAME"], os.environ["SETUP_KEY_VALUE"]
-pat = re.compile(r"\s*(?:export\s+)?" + re.escape(name) + r"\s*=")
-
-with open(".env") as f:
-    lines = [l for l in f.read().splitlines() if not pat.match(l)]
-lines.append(f"{name}={value}")
-
-with open(".env", "w") as f:
-    f.write("\n".join(lines) + "\n")
-PY
-chmod 600 .env 2>/dev/null || true
-
-echo "Setup complete. Project is in $(pwd)"

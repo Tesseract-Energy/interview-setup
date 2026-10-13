@@ -71,6 +71,23 @@ git -C "$FIXTURE_ENV_SRC" -c user.email=test@example.com -c user.name=test commi
 BARE_REPO_WITH_ENV="$TMP_ROOT/fixture-env.git"
 git clone -q --bare "$FIXTURE_ENV_SRC" "$BARE_REPO_WITH_ENV"
 
+# A repo carrying pyproject.toml, so the uv prerequisite check fires and the
+# dependency install can be made to fail on demand (by withholding uv from the
+# shimmed PATH). Used to prove a failed install doesn't lose a fetched key.
+FIXTURE_UV_SRC="$TMP_ROOT/fixture-uv-src"
+cp -R "$FIXTURE_SRC" "$FIXTURE_UV_SRC"
+rm -rf "$FIXTURE_UV_SRC/.git"
+git init -q -b main "$FIXTURE_UV_SRC"
+cat > "$FIXTURE_UV_SRC/pyproject.toml" <<'EOF'
+[project]
+name = "fixture-uv"
+version = "0.0.0"
+EOF
+git -C "$FIXTURE_UV_SRC" add -A
+git -C "$FIXTURE_UV_SRC" -c user.email=test@example.com -c user.name=test commit -qm init
+BARE_REPO_NEEDS_UV="$TMP_ROOT/fixture-uv.git"
+git clone -q --bare "$FIXTURE_UV_SRC" "$BARE_REPO_NEEDS_UV"
+
 # ---------- PATH shim helper: build a PATH containing only a whitelist of ----------
 # real tools, letting us simulate "X is not installed" by omitting X.
 # All the external (non-builtin) commands setup.sh can call are listed here.
@@ -389,6 +406,20 @@ else
   echo "not a clone" > "$work/fixture/stray.txt"
   out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
   assert_contains "$out" "isn't a git clone" "a non-clone directory in the way is explained"
+  cd "$HERE" || exit 1
+
+  # -- a failed dependency install must not lose the fetched key: the claim
+  # code is single-use, so losing it here means the candidate can't retry --
+  work="$TMP_ROOT/c12" && mkdir -p "$work" && cd "$work" || exit 1
+  # uv withheld, against a repo that needs it, so the install step fails.
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path 'uv')" \
+    bash "$SETUP" --claim GOODCODE "$BARE_REPO_NEEDS_UV" 2>&1 || true)"
+  if grep -q "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "$work/fixture-uv/.env" 2>/dev/null; then
+    ok "failed install still leaves the fetched key in .env (code not wasted)"
+  else
+    fail "failed install still leaves the fetched key in .env (code not wasted)"
+    echo "---- output ----"; echo "$out" | tail -5; echo "----------------"
+  fi
   cd "$HERE" || exit 1
 
   # -- an explicit key beats --claim, so the manual path still works --

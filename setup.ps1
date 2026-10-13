@@ -322,6 +322,29 @@ if (Test-Path (Join-Path $repoDir '.git')) {
     Set-Location $repoDir
 }
 
+# ---------- .env (before installing, on purpose) ----------
+# A claim code is single-use, so it's spent by the time we get here. If the
+# dependency install below failed first, the key would be gone with nothing
+# written, and the retry couldn't fetch it again - the candidate would need
+# someone to read it to them. Getting it onto disk first makes a failed
+# install a retryable annoyance instead.
+if ((Test-Path '.env.example') -and -not (Test-Path '.env')) {
+    Copy-Item '.env.example' '.env'
+}
+$envPath = Join-Path (Get-Location).Path '.env'
+$lines = @()
+if (Test-Path $envPath) { $lines = @(Get-Content -LiteralPath $envPath) }
+
+$pattern = '^\s*(?:export\s+)?' + [regex]::Escape($keyName) + '\s*='
+$kept = @($lines | Where-Object { $_ -notmatch $pattern })
+$kept += "$keyName=$apiKey"
+
+# UTF-8 without BOM so dotenv parsers read the first key correctly
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllLines($envPath, [string[]]$kept, $utf8)
+
+Write-Host "Setup complete. Project is in $((Get-Location).Path)"
+
 # ---------- repo-specific prerequisites + dependencies ----------
 if (Test-Path 'pyproject.toml') {
     if (-not (Have 'uv')) {
@@ -344,20 +367,3 @@ if (Test-Path 'package.json') {
     Check-Exit "dependency install"
 }
 
-# ---------- .env ----------
-if ((Test-Path '.env.example') -and -not (Test-Path '.env')) {
-    Copy-Item '.env.example' '.env'
-}
-$envPath = Join-Path (Get-Location).Path '.env'
-$lines = @()
-if (Test-Path $envPath) { $lines = @(Get-Content -LiteralPath $envPath) }
-
-$pattern = '^\s*(?:export\s+)?' + [regex]::Escape($keyName) + '\s*='
-$kept = @($lines | Where-Object { $_ -notmatch $pattern })
-$kept += "$keyName=$apiKey"
-
-# UTF-8 without BOM so dotenv parsers read the first key correctly
-$utf8 = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllLines($envPath, [string[]]$kept, $utf8)
-
-Write-Host "Setup complete. Project is in $((Get-Location).Path)"
