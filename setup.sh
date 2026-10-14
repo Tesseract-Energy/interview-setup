@@ -47,9 +47,8 @@ CLAIM_CODE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) CHECK_MODE=1; shift ;;
-    # The value is checked before shifting: with the flag last, `shift 2` fails
-    # and set -e kills the script with no output at all, so a typo'd command
-    # told the candidate nothing.
+    # Checked before shifting: with the flag last, `shift 2` would fail and
+    # set -e would exit silently.
     --claim) CLAIM_CODE="${2:-}"
              [ -n "$CLAIM_CODE" ] || die "--claim needs your claim code after it, e.g. --claim ABCD-2345"
              shift 2 ;;
@@ -247,52 +246,20 @@ check_network() {
   done
 }
 
-check_github_auth() {
-  # Informational only: the candidate may not have been invited yet.
-  if have gh && gh auth status >/dev/null 2>&1; then
-    report INFO "GitHub auth: signed in via gh CLI"
-    return
-  fi
-  if have ssh && ssh -T git@github.com -o BatchMode=yes -o ConnectTimeout=5 2>&1 | grep -qi "successfully authenticated"; then
-    report INFO "GitHub auth: SSH key authenticated"
-    return
-  fi
-  if have git; then
-    local helper
-    helper="$(git config --get credential.helper 2>/dev/null || true)"
-    if [ -n "$helper" ]; then
-      report INFO "GitHub auth: a git credential helper ('$helper') is configured (not verified)"
-      return
-    fi
-  fi
-  report INFO "GitHub auth: not detected yet (fine if you haven't been invited to the repo yet)"
-}
-
 run_check() {
-  local valid="git python uv tkinter"
-  local needs="${NEEDS:-git python uv}"
-  needs="$(echo "$needs" | tr ',' ' ')"
-
-  local item
-  for item in $needs; do
-    case " $valid " in
-      *" $item "*) ;;
-      *) die "Unknown --needs item '$item'. Supported: git, python, uv, tkinter" ;;
-    esac
-  done
-
   echo "Checking your machine for the interview..."
   echo
-  for item in $needs; do
+  local item
+  for item in $(echo "${NEEDS:-git python uv}" | tr ',' ' '); do
     case "$item" in
       git)     check_git ;;
       python)  check_python ;;
       uv)      check_uv ;;
       tkinter) check_tkinter ;;
+      *) die "Unknown --needs item '$item'. Supported: git, python, uv, tkinter" ;;
     esac
   done
   check_network
-  check_github_auth
 
   echo
   if [ "$CHECK_FAILED" = 1 ]; then
@@ -314,30 +281,20 @@ have git || try_install_git || die "git is not installed. Install it from https:
 "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
   || die "Python 3.11+ is required by the interview repo."
 
-# ---------- API key (before the clone, on purpose) ----------
-# A claim code is single-use. Cloning first meant a wrong or too-early code
-# left a half-built directory behind, so the retry died on "destination path
-# already exists" - and with a burned code there was nothing left to retry
-# with. Nothing touches the disk until the key is in hand.
+# ---------- API key ----------
+# Before the clone, on purpose: a claim code is single-use, so a bad one must
+# not leave a half-built directory behind.
 API_KEY="${!KEY_NAME:-}"
 
-# With --claim, swap the code for the key instead of asking the candidate to
-# paste one. The service returns the key as the whole body on success, and a
-# human-readable explanation on any failure - including "your key unlocks at
-# HH:MM UTC" when setup is run before the interview window opens - so the
-# wording lives server-side and this script just prints what it's told.
+# --claim swaps the code for the key: the service returns the key as the whole
+# body, or a message meant for you (e.g. "your key unlocks at HH:MM") on refusal.
 if [ -z "$API_KEY" ] && [ -n "$CLAIM_CODE" ]; then
   have curl || die "This needs curl to fetch your key. Install curl, or ask your interviewer for the key to paste instead."
   echo
   echo "Fetching your API key with claim code $CLAIM_CODE ..."
 
-  # The key is kept in a shell variable and never written to a temp file -
-  # it only ever lands on disk in .env, where it's meant to be.
-  #
-  # No -f: it makes curl discard the response body on a 4xx, which is exactly
-  # the body carrying the explanation the candidate needs to read. The status
-  # is appended as a trailing line instead, and split back off below.
-  # --get/--data-urlencode so an odd character in the code can't break the URL.
+  # No -f (it discards the 4xx body, which carries the explanation); status is
+  # appended as a trailing line. --data-urlencode so odd characters are safe.
   CLAIM_RESPONSE="$(curl -sS -w $'\n%{http_code}' --max-time 30 \
     --get --data-urlencode "code=${CLAIM_CODE}" \
     "$CLAIM_URL" 2>/dev/null || true)"
@@ -347,9 +304,8 @@ if [ -z "$API_KEY" ] && [ -n "$CLAIM_CODE" ]; then
 
   case "$CLAIM_STATUS" in
     200)
-      # Don't trust a 200 to mean "this is a key". A captive portal or an
-      # intercepting corporate proxy will happily return HTML with a 200, and
-      # writing that into .env fails much later as a confusing auth error.
+      # A 200 isn't proof it's a key: a captive portal or proxy can return
+      # HTML with one, which would fail much later as a confusing auth error.
       CLAIM_BODY="$(printf '%s' "$CLAIM_BODY" | tr -d '[:space:]')"
       case "$CLAIM_BODY" in
         sk-ant-*) ;;
@@ -389,10 +345,8 @@ echo "Key received (${#API_KEY} characters)."
 REPO_DIR="$(basename "${REPO_URL%/}")"
 REPO_DIR="${REPO_DIR%.git}"
 
-# Reuse an existing checkout rather than failing. A candidate who re-runs this
-# - after a failed claim, a dropped connection, or just twice - would otherwise
-# hit "destination path already exists" and be stuck. Never deletes it: by the
-# second run it may hold their work.
+# Reuse an existing checkout so re-running works. Never deletes it - by the
+# second run it may hold your work.
 if [ -d "$REPO_DIR/.git" ]; then
   echo "Found an existing $REPO_DIR - reusing it instead of cloning again."
   cd "$REPO_DIR"
@@ -403,12 +357,9 @@ else
   cd "$REPO_DIR"
 fi
 
-# ---------- .env (before installing, on purpose) ----------
-# A claim code is single-use, so it's spent by the time we get here. If the
-# dependency install below failed first, the key would be gone with nothing
-# written, and the retry couldn't fetch it again - the candidate would need
-# someone to read it to them. Getting it onto disk first makes a failed
-# install a retryable annoyance instead.
+# ---------- .env ----------
+# Written before installing: the claim code is already spent, so a failed
+# install must not lose the key with it.
 if [ -f .env.example ] && [ ! -f .env ]; then
   cp .env.example .env
 fi
@@ -449,7 +400,5 @@ fi
 # ---------- install dependencies ----------
 if [ -f pyproject.toml ]; then
   uv sync
-elif [ -f requirements.txt ]; then
-  "$PY" -m pip install -r requirements.txt
 fi
 

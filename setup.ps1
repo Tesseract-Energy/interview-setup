@@ -44,6 +44,8 @@ if (-not $Check -and [string]::IsNullOrWhiteSpace($RepoUrl)) {
 function Get-PythonCommand {
     if (Have 'py') { return 'py' }
     if (Have 'python') { return 'python' }
+    # pwsh is cross-platform, and python3 is the usual name off Windows.
+    if (Have 'python3') { return 'python3' }
     return $null
 }
 
@@ -143,41 +145,8 @@ function Check-Network {
     }
 }
 
-function Check-GitHubAuth {
-    # Informational only: the candidate may not have been invited yet.
-    if (Have 'gh') {
-        gh auth status *> $null
-        if ($LASTEXITCODE -eq 0) {
-            Report INFO "GitHub auth: signed in via gh CLI"
-            return
-        }
-    }
-    if (Have 'ssh') {
-        $out = (ssh -T git@github.com -o BatchMode=yes -o ConnectTimeout=5 2>&1) -join "`n"
-        if ($out -match 'successfully authenticated') {
-            Report INFO "GitHub auth: SSH key authenticated"
-            return
-        }
-    }
-    if (Have 'git') {
-        $helper = (git config --get credential.helper 2>$null)
-        if ($helper) {
-            Report INFO "GitHub auth: a git credential helper ('$helper') is configured (not verified)"
-            return
-        }
-    }
-    Report INFO "GitHub auth: not detected yet (fine if you haven't been invited to the repo yet)"
-}
-
 function Run-Check {
-    $valid = @('git', 'python', 'uv', 'tkinter')
     $needsList = if ($Needs) { $Needs -split ',' | ForEach-Object { $_.Trim() } } else { @('git', 'python', 'uv') }
-
-    foreach ($item in $needsList) {
-        if ($valid -notcontains $item) {
-            Fail "Unknown -Needs item '$item'. Supported: $($valid -join ', ')"
-        }
-    }
 
     Write-Host "Checking your machine for the interview..."
     Write-Host ""
@@ -187,10 +156,10 @@ function Run-Check {
             'python'  { Check-Python }
             'uv'      { Check-Uv }
             'tkinter' { Check-Tkinter }
+            default   { Fail "Unknown -Needs item '$item'. Supported: git, python, uv, tkinter" }
         }
     }
     Check-Network
-    Check-GitHubAuth
 
     Write-Host ""
     if ($script:CheckFailed) {
@@ -342,11 +311,6 @@ if (Test-Path 'pyproject.toml') {
     }
     uv sync
     Check-Exit "uv sync"
-} elseif (Test-Path 'requirements.txt') {
-    $py = Get-PythonCommand
-    if (-not $py) { Fail "Python 3 is not installed. Install it from https://www.python.org/downloads/ and re-run." }
-    & $py -m pip install -r requirements.txt
-    Check-Exit "pip install"
 }
 
 
