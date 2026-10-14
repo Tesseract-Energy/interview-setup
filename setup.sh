@@ -171,8 +171,10 @@ if [ -z "$API_KEY" ] && [ -n "$CLAIM_CODE" ]; then
 
   case "$CLAIM_STATUS" in
     200)
-      # A 200 isn't proof it's a key: a captive portal or proxy can return
-      # HTML with one, which would fail much later as a confusing auth error.
+      # Stripped here, not just with the other key sources below, because the
+      # check on the next line needs the bare value. A 200 isn't proof it's a
+      # key: a captive portal or proxy can return HTML with one, which would
+      # fail much later as a confusing auth error.
       CLAIM_BODY="$(printf '%s' "$CLAIM_BODY" | tr -d '[:space:]')"
       case "$CLAIM_BODY" in
         sk-ant-*) ;;
@@ -229,8 +231,9 @@ fi
 # install must not lose the key with it.
 if [ -f .env.example ] && [ ! -f .env ]; then
   cp .env.example .env
+elif [ ! -f .env ]; then
+  touch .env
 fi
-touch .env
 
 # The key goes to Python through the environment, never the command line
 SETUP_KEY_NAME="$KEY_NAME" SETUP_KEY_VALUE="$API_KEY" "$PY" - <<'PY'
@@ -247,8 +250,6 @@ with open(".env", "w") as f:
     f.write("\n".join(lines) + "\n")
 PY
 chmod 600 .env 2>/dev/null || true
-
-echo "Setup complete. Project is in $(pwd)"
 
 # ---------- repo-specific prerequisites ----------
 if [ -f pyproject.toml ]; then
@@ -269,3 +270,4 @@ if [ -f pyproject.toml ]; then
   uv sync
 fi
 
+echo "Setup complete. Project is in $(pwd)"

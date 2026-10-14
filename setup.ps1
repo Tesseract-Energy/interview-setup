@@ -183,8 +183,6 @@ if (Test-Path (Join-Path $repoDir '.git')) {
 # A claim code is single-use, so it's spent by the time we get here. If the
 # dependency install below failed first, the key would be gone with nothing
 # written, and the retry couldn't fetch it again - the candidate would need
-# someone to read it to them. Getting it onto disk first makes a failed
-# install a retryable annoyance instead.
 if ((Test-Path '.env.example') -and -not (Test-Path '.env')) {
     Copy-Item '.env.example' '.env'
 }
@@ -200,7 +198,6 @@ $kept += "$keyName=$apiKey"
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllLines($envPath, [string[]]$kept, $utf8)
 
-Write-Host "Setup complete. Project is in $((Get-Location).Path)"
 
 # ---------- repo-specific prerequisites + dependencies ----------
 if (Test-Path 'pyproject.toml') {
@@ -211,4 +208,4 @@ if (Test-Path 'pyproject.toml') {
     Check-Exit "uv sync"
 }
 
-
+Write-Host "Setup complete. Project is in $((Get-Location).Path)"
