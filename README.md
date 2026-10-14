@@ -1,12 +1,18 @@
 # interview-setup
 
 Machine setup for a code interview. This repo has no secrets and no exercise
-content — it only contains two small, readable scripts that get your laptop
-ready before the call.
+content — just two scripts that get your laptop ready before the call.
 
 **You can open `setup.sh` / `setup.ps1` in any text editor and read every
 line before you run them.** Neither script needs git to download — you only
 need git for the clone step that comes after.
+
+They're longer than you might expect for "clone a repo and set a key", and
+it's worth knowing why before you read them: roughly half of each script is
+installing prerequisites for you across macOS and the main Linux package
+managers (Homebrew, apt, dnf, pacman, zypper), so that one command works
+whatever you're on. The part that does the actual setup — clone, fetch the
+key, write `.env` — is about a hundred lines.
 
 ## Prerequisites
 
