@@ -34,13 +34,13 @@ files. It only looks at what's on your machine.
 **macOS / Linux**
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/c763072/setup.sh -o setup.sh && bash setup.sh --check
+curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9abb236/setup.sh -o setup.sh && bash setup.sh --check
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/c763072/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check
+irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9abb236/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check
 ```
 
 > The script is saved to a file and run from there, rather than piped
@@ -67,8 +67,8 @@ is a more likely cause than anything sinister, but either way it's worth
 knowing.)
 
 ```bash
-shasum -a 256 setup.sh     # expect 0f7c85cdea18c6df1625705be56748fc3c85a71b1b604c863edd956e19246c43
-shasum -a 256 setup.ps1    # expect b2e817e07ead3bc0d5b7758877cb5ea029b9166701dce294d9ed5f8bbd86cacf
+shasum -a 256 setup.sh     # expect d400d799fe389a97b68fe89fd77eefba138590fb38bb878d022e8a3b5a46290b
+shasum -a 256 setup.ps1    # expect 6f20e8253b30357b74b01f65b786acd332245795afe453df4b44d6887b705aca
 ```
 
 On Windows PowerShell: `Get-FileHash setup.ps1 -Algorithm SHA256`
@@ -90,13 +90,13 @@ were given:
 **macOS / Linux**
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/c763072/setup.sh -o setup.sh && bash setup.sh --claim YOUR-CODE <repo-url>
+curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9abb236/setup.sh -o setup.sh && bash setup.sh --claim YOUR-CODE <repo-url>
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/c763072/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Claim YOUR-CODE <repo-url>
+irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9abb236/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Claim YOUR-CODE <repo-url>
 ```
 
 That clones the repo, installs its dependencies, fetches your API key and
