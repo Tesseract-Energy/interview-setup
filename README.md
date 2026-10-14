@@ -32,8 +32,8 @@ of these are reasonable, and none of them need our help:
 
 **Read it in your browser first** — no download needed. These are permalinks
 to one fixed commit, so what you read is exactly what the command below runs:
-[setup.sh](https://github.com/Tesseract-Energy/interview-setup/blob/PINPLACEHOLDER/setup.sh)
-· [setup.ps1](https://github.com/Tesseract-Energy/interview-setup/blob/PINPLACEHOLDER/setup.ps1)
+[setup.sh](https://github.com/Tesseract-Energy/interview-setup/blob/a4e32bb/setup.sh)
+· [setup.ps1](https://github.com/Tesseract-Energy/interview-setup/blob/a4e32bb/setup.ps1)
 
 **Download, read, then run** — drop the `&& bash ...` half of the command,
 open the file in any editor, and run it yourself when you're satisfied.
@@ -44,8 +44,8 @@ is a more likely cause than anything sinister, but either way it's worth
 knowing.)
 
 ```bash
-shasum -a 256 setup.sh     # expect d400d799fe389a97b68fe89fd77eefba138590fb38bb878d022e8a3b5a46290b
-shasum -a 256 setup.ps1    # expect 6f20e8253b30357b74b01f65b786acd332245795afe453df4b44d6887b705aca
+shasum -a 256 setup.sh     # expect e29f2e1050ab8ab0073652edc46e3b266bd89827f48e1fd57503b33f31aed807
+shasum -a 256 setup.ps1    # expect 55d6777da7492d8d431fa9699a6d0e8d34317ef7eae2c07698c77b8e50bb7a58
 ```
 
 On Windows PowerShell: `Get-FileHash setup.ps1 -Algorithm SHA256`
@@ -58,13 +58,13 @@ were given:
 **macOS / Linux**
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9abb236/setup.sh -o setup.sh && bash setup.sh --claim YOUR-CODE <repo-url>
+curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/a4e32bb/setup.sh -o setup.sh && bash setup.sh --claim YOUR-CODE <repo-url>
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9abb236/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Claim YOUR-CODE <repo-url>
+irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/a4e32bb/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Claim YOUR-CODE <repo-url>
 ```
 
 That clones the repo, installs its dependencies, fetches your API key and
