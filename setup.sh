@@ -52,27 +52,20 @@ while [ $# -gt 0 ]; do
     --claim) CLAIM_CODE="${2:-}"
              [ -n "$CLAIM_CODE" ] || die "--claim needs your claim code after it, e.g. --claim ABCD-2345"
              shift 2 ;;
-    --claim=*) CLAIM_CODE="${1#*=}"; shift ;;
     --needs) NEEDS="${2:-}"
              [ -n "$NEEDS" ] || die "--needs needs a comma-separated list after it, e.g. --needs git,uv"
              shift 2 ;;
-    --needs=*) NEEDS="${1#*=}"; shift ;;
     -h|--help) usage; exit 0 ;;
-    --) shift; break ;;
     -*) die "Unknown option: $1 (see: bash $0 --help)" ;;
     *) REPO_URL="$1"; shift ;;
   esac
 done
 
 KEY_NAME="${KEY_NAME:-ANTHROPIC_API_KEY}"
-# Overridable so the service can be pointed at a local/staging instance while
-# testing, without editing the copy candidates download.
+# Overridable so tests can point at a local instance.
 CLAIM_URL="${CLAIM_URL:-https://onboarding-service-chi.vercel.app/api/claim}"
 
-if [ "$CHECK_MODE" = 0 ] && [ -z "$REPO_URL" ]; then
-  usage >&2
-  exit 1
-fi
+[ "$CHECK_MODE" = 1 ] || [ -n "$REPO_URL" ] || { usage >&2; exit 1; }
 
 OS="$(uname -s)"
 case "$OS" in
