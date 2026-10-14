@@ -1,6 +1,6 @@
 # Usage (PowerShell):
 #   powershell -ExecutionPolicy Bypass -File .\setup.ps1 <repo-url>
-#   powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check [-Needs git,uv,node]
+#   powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check [-Needs git,uv,tkinter]
 #
 # Windows counterpart of setup.sh: clones the repo, checks/installs prerequisites,
 # installs dependencies, then asks you to paste the API key (input is hidden)
@@ -35,7 +35,7 @@ $keyName = if ($env:KEY_NAME) { $env:KEY_NAME } else { 'ANTHROPIC_API_KEY' }
 if (-not $Check -and [string]::IsNullOrWhiteSpace($RepoUrl)) {
     Write-Host "Usage:"
     Write-Host "  .\setup.ps1 <repo-url>"
-    Write-Host "  .\setup.ps1 -Check [-Needs git,uv,node]"
+    Write-Host "  .\setup.ps1 -Check [-Needs git,uv,tkinter]"
     exit 1
 }
 
@@ -121,15 +121,6 @@ function Check-Uv {
     }
 }
 
-function Check-Node {
-    if (Have 'node') {
-        $v = (node --version)
-        Report PASS "node ($v)"
-    } else {
-        Report FAIL "node" "not installed" "install from https://nodejs.org"
-    }
-}
-
 function Check-Tkinter {
     # tkinter only matters on Linux for this interview's manual-testing tool;
     # Windows candidates are never asked to install it.
@@ -179,7 +170,7 @@ function Check-GitHubAuth {
 }
 
 function Run-Check {
-    $valid = @('git', 'python', 'uv', 'node', 'tkinter')
+    $valid = @('git', 'python', 'uv', 'tkinter')
     $needsList = if ($Needs) { $Needs -split ',' | ForEach-Object { $_.Trim() } } else { @('git', 'python', 'uv') }
 
     foreach ($item in $needsList) {
@@ -195,7 +186,6 @@ function Run-Check {
             'git'     { Check-Git }
             'python'  { Check-Python }
             'uv'      { Check-Uv }
-            'node'    { Check-Node }
             'tkinter' { Check-Tkinter }
         }
     }
@@ -359,11 +349,4 @@ if (Test-Path 'pyproject.toml') {
     Check-Exit "pip install"
 }
 
-if (Test-Path 'package.json') {
-    if (-not (Have 'npm')) { Fail "This repo needs Node.js/npm. Install from https://nodejs.org and re-run." }
-    if ((Test-Path 'pnpm-lock.yaml') -and (Have 'pnpm')) { pnpm install }
-    elseif ((Test-Path 'yarn.lock') -and (Have 'yarn')) { yarn install }
-    else { npm install }
-    Check-Exit "dependency install"
-}
 

@@ -33,7 +33,7 @@ Usage:
   --check           Verify your machine is ready. Never clones, never asks
                      for a key, never touches .env.
   --needs LIST      Comma-separated prerequisites to check (with --check).
-                     One or more of: git,python,uv,node,tkinter
+                     One or more of: git,python,uv,tkinter
                      Default: git,python,uv
 EOF
 }
@@ -125,23 +125,11 @@ try_install_git() {
 
 # uv bundles its own Python builds. We verified directly that uv-managed
 # Python on macOS already ships a working tkinter (no system Tk needed) -
-# see is_homebrew_python() below for why the macOS brew hint only applies
-# to Homebrew's own Python, not uv's.
-is_homebrew_python() {
-  have brew || return 1
-  [ -n "$PY" ] || return 1
-  local exec_prefix brew_prefix
-  exec_prefix="$("$PY" -c 'import sys; print(sys.exec_prefix)' 2>/dev/null)" || return 1
-  brew_prefix="$(brew --prefix 2>/dev/null)" || return 1
-  case "$exec_prefix" in "$brew_prefix"*) return 0 ;; *) return 1 ;; esac
-}
-
 tkinter_install_cmd() {
   if   have apt-get; then echo "sudo apt-get install -y python3-tk"
   elif have dnf;     then echo "sudo dnf install -y python3-tkinter"
   elif have pacman;  then echo "sudo pacman -S --noconfirm tk"
   elif have zypper;  then echo "sudo zypper install -y python3-tk"
-  elif [ "$OS" = "Darwin" ] && have brew && is_homebrew_python; then echo "brew install python-tk"
   else echo ""
   fi
 }
@@ -221,12 +209,6 @@ check_uv() {
   fi
 }
 
-check_node() {
-  if have node; then report PASS "node ($(node --version))"
-  else report FAIL "node" "not installed" "install from https://nodejs.org"
-  fi
-}
-
 check_tkinter() {
   if [ "$OS" != "Linux" ]; then
     report INFO "tkinter check only applies to Linux, skipped on $OS"
@@ -287,7 +269,7 @@ check_github_auth() {
 }
 
 run_check() {
-  local valid="git python uv node tkinter"
+  local valid="git python uv tkinter"
   local needs="${NEEDS:-git python uv}"
   needs="$(echo "$needs" | tr ',' ' ')"
 
@@ -295,7 +277,7 @@ run_check() {
   for item in $needs; do
     case " $valid " in
       *" $item "*) ;;
-      *) die "Unknown --needs item '$item'. Supported: git, python, uv, node, tkinter" ;;
+      *) die "Unknown --needs item '$item'. Supported: git, python, uv, tkinter" ;;
     esac
   done
 
@@ -306,7 +288,6 @@ run_check() {
       git)     check_git ;;
       python)  check_python ;;
       uv)      check_uv ;;
-      node)    check_node ;;
       tkinter) check_tkinter ;;
     esac
   done
@@ -470,11 +451,5 @@ if [ -f pyproject.toml ]; then
   uv sync
 elif [ -f requirements.txt ]; then
   "$PY" -m pip install -r requirements.txt
-fi
-if [ -f package.json ]; then
-  if   [ -f pnpm-lock.yaml ] && have pnpm; then pnpm install
-  elif [ -f yarn.lock ]      && have yarn; then yarn install
-  else have npm || die "This repo needs Node.js/npm. Install from https://nodejs.org and re-run."; npm install
-  fi
 fi
 
