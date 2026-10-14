@@ -9,10 +9,6 @@
 #
 # Non-interactive alternative: ANTHROPIC_API_KEY=... bash setup.sh <repo-url>
 # Set KEY_NAME to use a different env var name (default: ANTHROPIC_API_KEY).
-#
-# Dry run, no clone, no key, no .env changes:
-#   bash setup.sh --check
-#   bash setup.sh --check --needs git,uv        (default: git,python,uv)
 set -euo pipefail
 
 # ---------- helpers (needed before argument parsing can use them) ----------
@@ -23,37 +19,23 @@ usage() {
   cat <<'EOF'
 Usage:
   bash setup.sh <repo-url>
-  bash setup.sh --check [--needs git,uv]
 
   <repo-url>        Clone this repo and set it up for the interview.
   --claim CODE      Fetch your API key automatically using the claim code
                      your interviewer gave you, instead of pasting a key.
                      The code only works from shortly before your interview
                      starts, and only once.
-  --check           Verify your machine is ready. Never clones, never asks
-                     for a key, never touches .env.
-  --needs LIST      Comma-separated prerequisites to check (with --check).
-                     One or more of: git,python,uv,tkinter
-                     Default: git,python,uv
 EOF
 }
 
 # ---------- argument parsing ----------
-CHECK_MODE=0
-NEEDS=""
 REPO_URL=""
 CLAIM_CODE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --check) CHECK_MODE=1; shift ;;
-    # Checked before shifting: with the flag last, `shift 2` would fail and
-    # set -e would exit silently.
     --claim) CLAIM_CODE="${2:-}"
              [ -n "$CLAIM_CODE" ] || die "--claim needs your claim code after it, e.g. --claim ABCD-2345"
-             shift 2 ;;
-    --needs) NEEDS="${2:-}"
-             [ -n "$NEEDS" ] || die "--needs needs a comma-separated list after it, e.g. --needs git,uv"
              shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) die "Unknown option: $1 (see: bash $0 --help)" ;;
@@ -65,7 +47,7 @@ KEY_NAME="${KEY_NAME:-ANTHROPIC_API_KEY}"
 # Overridable so tests can point at a local instance.
 CLAIM_URL="${CLAIM_URL:-https://onboarding-service-chi.vercel.app/api/claim}"
 
-[ "$CHECK_MODE" = 1 ] || [ -n "$REPO_URL" ] || { usage >&2; exit 1; }
+[ -n "$REPO_URL" ] || { usage >&2; exit 1; }
 
 OS="$(uname -s)"
 case "$OS" in
@@ -84,11 +66,10 @@ confirm() {
 }
 
 # Best-effort Python discovery. Main flow (below) enforces that this exists
-# and is 3.11+ (what the interview repo's pyproject.toml requires); --check
-# reports on it as just another pass/fail item instead.
+# and is 3.11+, which the interview repo's pyproject.toml requires.
 PY="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
 
-# ---------- install helpers (shared by --check and the main flow) ----------
+# ---------- prerequisite installers ----------
 # Each try_install_* function explains the fix, asks before doing anything,
 # never runs sudo silently, and leaves the exact command on screen if it
 # can't (or you don't want it to) install something for you.
@@ -158,113 +139,6 @@ try_install_uv() {
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
   have uv
 }
-
-# ============================================================
-# --check mode: verify, never clone/ask-for-a-key/touch .env
-# ============================================================
-CHECK_FAILED=0
-
-report() {
-  # $1=PASS|FAIL|INFO  $2=label  $3=detail (FAIL only)  $4=fix (FAIL only)
-  case "$1" in
-    PASS) printf '  [PASS] %s\n' "$2" ;;
-    INFO) printf '  [INFO] %s\n' "$2" ;;
-    FAIL)
-      printf '  [FAIL] %s - %s\n' "$2" "$3"
-      [ -n "${4:-}" ] && printf '         Fix: %s\n' "$4"
-      CHECK_FAILED=1
-      ;;
-  esac
-}
-
-check_git() {
-  have git || try_install_git || true
-  if have git; then report PASS "git ($(git --version))"
-  else report FAIL "git" "not installed" "https://git-scm.com/downloads"
-  fi
-}
-
-check_python() {
-  if [ -n "$PY" ] && "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1; then
-    report PASS "python ($("$PY" -V 2>&1))"
-  elif [ -n "$PY" ]; then
-    report FAIL "python" "found but older than 3.11" "install Python 3.11+ from https://www.python.org/downloads/"
-  else
-    report FAIL "python" "not installed" "install Python 3.11+ from https://www.python.org/downloads/"
-  fi
-}
-
-check_uv() {
-  have uv || try_install_uv || true
-  if have uv; then report PASS "uv ($(uv --version))"
-  else report FAIL "uv" "not installed" "curl -LsSf https://astral.sh/uv/install.sh | sh"
-  fi
-}
-
-check_tkinter() {
-  if [ "$OS" != "Linux" ]; then
-    report INFO "tkinter check only applies to Linux, skipped on $OS"
-    return
-  fi
-  if [ -z "$PY" ]; then
-    report FAIL "tkinter" "no Python interpreter found to check it with" "install Python first"
-    return
-  fi
-  if ! "$PY" -c 'import tkinter' >/dev/null 2>&1; then
-    try_install_tkinter || true
-  fi
-  if "$PY" -c 'import tkinter' >/dev/null 2>&1; then
-    report PASS "tkinter"
-  else
-    report FAIL "tkinter" "not available for $PY" "$(tkinter_install_cmd)"
-  fi
-}
-
-check_network() {
-  local host ok
-  for host in github.com astral.sh; do
-    ok=1
-    if have curl; then
-      curl -fsS --max-time 5 -o /dev/null "https://$host" || ok=0
-    elif have wget; then
-      wget -q --timeout=5 -O /dev/null "https://$host" || ok=0
-    else
-      ok=0
-    fi
-    if [ "$ok" = 1 ]; then
-      report PASS "network: $host reachable"
-    else
-      report FAIL "network: $host" "could not reach $host" "check your internet connection, VPN, or firewall"
-    fi
-  done
-}
-
-run_check() {
-  echo "Checking your machine for the interview..."
-  echo
-  local item
-  for item in $(echo "${NEEDS:-git python uv}" | tr ',' ' '); do
-    case "$item" in
-      git)     check_git ;;
-      python)  check_python ;;
-      uv)      check_uv ;;
-      tkinter) check_tkinter ;;
-      *) die "Unknown --needs item '$item'. Supported: git, python, uv, tkinter" ;;
-    esac
-  done
-  check_network
-
-  echo
-  if [ "$CHECK_FAILED" = 1 ]; then
-    echo "Result: fix the items above."
-    exit 1
-  else
-    echo "Result: ready for the interview."
-    exit 0
-  fi
-}
-
-[ "$CHECK_MODE" = 1 ] && run_check
 
 # ============================================================
 # Main flow: clone, install, ask for the key, write .env

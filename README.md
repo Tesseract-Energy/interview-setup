@@ -7,12 +7,10 @@ content — just two scripts that get your laptop ready before the call.
 line before you run them.** Neither script needs git to download — you only
 need git for the clone step that comes after.
 
-They're longer than you might expect for "clone a repo and set a key", and
-it's worth knowing why before you read them: roughly half of each script is
-installing prerequisites for you across macOS and the main Linux package
-managers (Homebrew, apt, dnf, pacman, zypper), so that one command works
-whatever you're on. The part that does the actual setup — clone, fetch the
-key, write `.env` — is about a hundred lines.
+Most of what's in them is installing prerequisites for you across macOS and
+the main Linux package managers (Homebrew, apt, dnf, pacman, zypper), so that
+one command works whatever you're on. The setup itself — clone, fetch the key,
+write `.env`, install dependencies — is about a hundred lines.
 
 ## Prerequisites
 
@@ -23,40 +21,19 @@ key, write `.env` — is about a hundred lines.
 - An internet connection (to clone the interview repo and reach
   `github.com` and `astral.sh`)
 
-You don't need any of these installed before you run `--check` below — it
-tells you exactly what's missing and how to fix it.
-
-## 1. Check your machine (do this a day or two before the interview)
-
-This step never clones anything, never asks for a key, and never writes any
-files. It only looks at what's on your machine.
-
-**macOS / Linux**
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9abb236/setup.sh -o setup.sh && bash setup.sh --check
-```
-
-**Windows (PowerShell)**
-
-```powershell
-irm https://raw.githubusercontent.com/Tesseract-Energy/interview-setup/9abb236/setup.ps1 -OutFile setup.ps1; powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check
-```
-
-> The script is saved to a file and run from there, rather than piped
-> straight into your shell, so it's sitting next to you afterwards if you
-> want to read what it did — and the link points at one fixed, reviewable
-> version (not a moving branch).
+You don't need any of these installed beforehand — the script offers to
+install what's missing, and tells you the exact command if you'd rather do it
+yourself.
 
 ### Checking it before you run it
 
 You're being asked to run a script from a company you don't work for yet. All
 of these are reasonable, and none of them need our help:
 
-**Read it in your browser first** — no download needed. The links above are
-permalinks to one fixed commit, so what you read is exactly what you'd run:
-[setup.sh](https://github.com/Tesseract-Energy/interview-setup/blob/c763072/setup.sh)
-· [setup.ps1](https://github.com/Tesseract-Energy/interview-setup/blob/c763072/setup.ps1)
+**Read it in your browser first** — no download needed. These are permalinks
+to one fixed commit, so what you read is exactly what the command below runs:
+[setup.sh](https://github.com/Tesseract-Energy/interview-setup/blob/PINPLACEHOLDER/setup.sh)
+· [setup.ps1](https://github.com/Tesseract-Energy/interview-setup/blob/PINPLACEHOLDER/setup.ps1)
 
 **Download, read, then run** — drop the `&& bash ...` half of the command,
 open the file in any editor, and run it yourself when you're satisfied.
@@ -73,16 +50,7 @@ shasum -a 256 setup.ps1    # expect 6f20e8253b30357b74b01f65b786acd332245795afe4
 
 On Windows PowerShell: `Get-FileHash setup.ps1 -Algorithm SHA256`
 
-**Run the harmless mode first.** `--check` only looks at what's installed on
-your machine: it never clones anything, never asks for a key, and never writes
-a file. That's step 1 below, and it's a safe way to see the script work before
-the real run.
-
-If it prints `ready for the interview`, you're done. If it prints
-`fix the items above`, follow the fix listed next to each failed item and
-run `--check` again.
-
-## 2. On the day, once you've accepted the repo invite
+## Running it, once you've accepted the repo invite
 
 One command. Substitute the **claim code** and the **interview repo URL** you
 were given:
@@ -121,18 +89,18 @@ script will ask you to paste the API key shared with you on the call instead.
   or install it yourself from [docs.astral.sh/uv](https://docs.astral.sh/uv/).
 - **A `sudo` install fails, or you don't have sudo rights** — the script
   prints the exact command it would have run. Ask whoever manages your
-  machine to run that command, then re-run `--check`.
+  machine to run that command, then re-run the setup.
 - **tkinter warning on Linux** — only some interviews' manual-testing tools
   need this; the script offers to install the right package for your distro.
 - **PowerShell won't run the script** — Windows blocks unsigned scripts by
   default. Use `powershell -ExecutionPolicy Bypass -File .\setup.ps1 ...`
   exactly as shown above; this doesn't change any system setting, it only
   applies to that one run.
-- **Network check fails for `github.com` or `astral.sh`** — usually a
-  corporate VPN, proxy, or firewall. Try from a different network, or ask
-  your network admin to allow those two hosts.
+- **Can't reach `github.com` or `astral.sh`** — usually a corporate VPN,
+  proxy, or firewall. Try from a different network, or ask your network admin
+  to allow those two hosts.
 - **Nothing happens when pasting the key** — that's expected, input is
   hidden on purpose. Paste once, then press Enter.
 
-If `--check` says you're ready but something still goes wrong on the call,
-tell your interviewer — don't spend call time debugging your machine.
+If something goes wrong on the call, tell your interviewer — don't spend call
+time debugging your machine.

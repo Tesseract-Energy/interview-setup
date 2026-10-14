@@ -1,6 +1,5 @@
 # Usage (PowerShell):
 #   powershell -ExecutionPolicy Bypass -File .\setup.ps1 <repo-url>
-#   powershell -ExecutionPolicy Bypass -File .\setup.ps1 -Check [-Needs git,uv,tkinter]
 #
 # Windows counterpart of setup.sh: clones the repo, checks/installs prerequisites,
 # installs dependencies, then asks you to paste the API key (input is hidden)
@@ -13,8 +12,6 @@
 # -Needs tailors which prerequisites -Check verifies (default: git,python,uv).
 param(
     [Parameter(Position = 0)][string]$RepoUrl,
-    [switch]$Check,
-    [string]$Needs,
     [string]$Claim
 )
 
@@ -32,10 +29,9 @@ function Confirm($prompt) {
 
 $keyName = if ($env:KEY_NAME) { $env:KEY_NAME } else { 'ANTHROPIC_API_KEY' }
 
-if (-not $Check -and [string]::IsNullOrWhiteSpace($RepoUrl)) {
+if ([string]::IsNullOrWhiteSpace($RepoUrl)) {
     Write-Host "Usage:"
     Write-Host "  .\setup.ps1 <repo-url>"
-    Write-Host "  .\setup.ps1 -Check [-Needs git,uv,tkinter]"
     exit 1
 }
 
@@ -73,105 +69,7 @@ function Try-InstallUv {
 # ============================================================
 # -Check mode: verify, never clone/ask-for-a-key/touch .env
 # ============================================================
-$script:CheckFailed = $false
 
-function Report {
-    param([string]$Level, [string]$Label, [string]$Detail, [string]$FixCmd)
-    switch ($Level) {
-        'PASS' { Write-Host "  [PASS] $Label" }
-        'INFO' { Write-Host "  [INFO] $Label" }
-        'FAIL' {
-            Write-Host "  [FAIL] $Label - $Detail"
-            if ($FixCmd) { Write-Host "         Fix: $FixCmd" }
-            $script:CheckFailed = $true
-        }
-    }
-}
-
-function Check-Git {
-    if (-not (Have 'git')) { [void](Try-InstallGit) }
-    if (Have 'git') {
-        $v = (git --version)
-        Report PASS "git ($v)"
-    } else {
-        Report FAIL "git" "not installed" "https://git-scm.com/downloads"
-    }
-}
-
-function Check-Python {
-    $py = Get-PythonCommand
-    if (-not $py) {
-        Report FAIL "python" "not installed" "install Python 3.11+ from https://www.python.org/downloads/"
-        return
-    }
-    & $py -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        $v = (& $py -V 2>&1)
-        Report PASS "python ($v)"
-    } else {
-        Report FAIL "python" "found but older than 3.11" "install Python 3.11+ from https://www.python.org/downloads/"
-    }
-}
-
-function Check-Uv {
-    if (-not (Have 'uv')) { [void](Try-InstallUv) }
-    if (Have 'uv') {
-        $v = (uv --version)
-        Report PASS "uv ($v)"
-    } else {
-        Report FAIL "uv" "not installed" "irm https://astral.sh/uv/install.ps1 | iex"
-    }
-}
-
-function Check-Tkinter {
-    # tkinter only matters on Linux for this interview's manual-testing tool;
-    # Windows candidates are never asked to install it.
-    Report INFO "tkinter check does not apply on Windows, skipped"
-}
-
-function Check-Network {
-    foreach ($host_ in @('github.com', 'astral.sh')) {
-        $ok = $true
-        try {
-            $null = Invoke-WebRequest -Uri "https://$host_" -Method Head -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
-        } catch {
-            $ok = $false
-        }
-        if ($ok) {
-            Report PASS "network: $host_ reachable"
-        } else {
-            Report FAIL "network: $host_" "could not reach $host_" "check your internet connection, VPN, or firewall"
-        }
-    }
-}
-
-function Run-Check {
-    $needsList = if ($Needs) { $Needs -split ',' | ForEach-Object { $_.Trim() } } else { @('git', 'python', 'uv') }
-
-    Write-Host "Checking your machine for the interview..."
-    Write-Host ""
-    foreach ($item in $needsList) {
-        switch ($item) {
-            'git'     { Check-Git }
-            'python'  { Check-Python }
-            'uv'      { Check-Uv }
-            'tkinter' { Check-Tkinter }
-            default   { Fail "Unknown -Needs item '$item'. Supported: git, python, uv, tkinter" }
-        }
-    }
-    Check-Network
-
-    Write-Host ""
-    if ($script:CheckFailed) {
-        Write-Host "Result: fix the items above."
-        exit 1
-    } else {
-        Write-Host "Result: ready for the interview."
-        exit 0
-    }
-}
-
-if ($Check) { Run-Check }
 
 # ============================================================
 # Main flow: clone, install, ask for the key, write .env
