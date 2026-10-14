@@ -102,12 +102,12 @@ function Check-Python {
         Report FAIL "python" "not installed" "install Python 3.11+ from https://www.python.org/downloads/"
         return
     }
-    & $py -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)" 2>$null
+    & $py -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>$null
     if ($LASTEXITCODE -eq 0) {
         $v = (& $py -V 2>&1)
         Report PASS "python ($v)"
     } else {
-        Report FAIL "python" "found but older than 3.8" "install Python 3.11+ from https://www.python.org/downloads/"
+        Report FAIL "python" "found but older than 3.11" "install Python 3.11+ from https://www.python.org/downloads/"
     }
 }
 

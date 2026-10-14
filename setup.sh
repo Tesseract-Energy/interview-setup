@@ -92,7 +92,8 @@ confirm() {
 }
 
 # Best-effort Python discovery. Main flow (below) enforces that this exists
-# and is 3.8+; --check reports on it as just another pass/fail item instead.
+# and is 3.11+ (what the interview repo's pyproject.toml requires); --check
+# reports on it as just another pass/fail item instead.
 PY="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
 
 # ---------- install helpers (shared by --check and the main flow) ----------
@@ -204,10 +205,10 @@ check_git() {
 }
 
 check_python() {
-  if [ -n "$PY" ] && "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+  if [ -n "$PY" ] && "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1; then
     report PASS "python ($("$PY" -V 2>&1))"
   elif [ -n "$PY" ]; then
-    report FAIL "python" "found but older than 3.8" "install Python 3.11+ from https://www.python.org/downloads/"
+    report FAIL "python" "found but older than 3.11" "install Python 3.11+ from https://www.python.org/downloads/"
   else
     report FAIL "python" "not installed" "install Python 3.11+ from https://www.python.org/downloads/"
   fi
@@ -329,8 +330,8 @@ run_check() {
 # ============================================================
 have git || try_install_git || die "git is not installed. Install it from https://git-scm.com/downloads and re-run."
 [ -n "$PY" ] || die "Python 3 is not installed. Install Python 3.11+ from https://www.python.org/downloads/ and re-run."
-"$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' \
-  || die "Python 3.8+ is required to run this script."
+"$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
+  || die "Python 3.11+ is required by the interview repo."
 
 # ---------- API key (before the clone, on purpose) ----------
 # A claim code is single-use. Cloning first meant a wrong or too-early code

@@ -17,7 +17,7 @@ key, write `.env` — is about a hundred lines.
 ## Prerequisites
 
 - **git**, the scripts can offer to install it for you if it's missing
-- **Python 3.8+**
+- **Python 3.11+**
 - **uv** ([docs.astral.sh/uv](https://docs.astral.sh/uv/)) — only if the
   interview repo needs it; the script offers to install it for you
 - An internet connection (to clone the interview repo and reach
