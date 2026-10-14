@@ -12,7 +12,7 @@
 #
 # Dry run, no clone, no key, no .env changes:
 #   bash setup.sh --check
-#   bash setup.sh --check --needs git,uv,node   (default needs: git,python,uv)
+#   bash setup.sh --check --needs git,uv        (default: git,python,uv)
 set -euo pipefail
 
 # ---------- helpers (needed before argument parsing can use them) ----------
@@ -23,7 +23,7 @@ usage() {
   cat <<'EOF'
 Usage:
   bash setup.sh <repo-url>
-  bash setup.sh --check [--needs git,uv,node]
+  bash setup.sh --check [--needs git,uv]
 
   <repo-url>        Clone this repo and set it up for the interview.
   --claim CODE      Fetch your API key automatically using the claim code
