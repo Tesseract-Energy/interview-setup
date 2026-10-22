@@ -34,8 +34,8 @@ of these are reasonable, and none of them need our help:
 
 **Read it in your browser first** — no download needed. These are permalinks
 to one fixed commit, so what you read is exactly what the command below runs:
-[setup.sh](https://github.com/Tesseract-Energy/interview-setup/blob/9aac773/setup.sh)
-· [setup.ps1](https://github.com/Tesseract-Energy/interview-setup/blob/9aac773/setup.ps1)
+[setup.sh](https://github.com/Tesseract-Energy/interview-setup/blob/d5fd4e6/setup.sh)
+· [setup.ps1](https://github.com/Tesseract-Energy/interview-setup/blob/d5fd4e6/setup.ps1)
 
 **Download, read, then run** — drop the `&& bash ...` half of the command,
 open the file in any editor, and run it yourself when you're satisfied.
@@ -46,8 +46,8 @@ is a more likely cause than anything sinister, but either way it's worth
 knowing.)
 
 ```bash
-shasum -a 256 setup.sh     # expect 1294313e68cbc0d763443c0edc3176691da56b671451fd09cbabb05b065e8c09
-shasum -a 256 setup.ps1    # expect d3d5187767ded235c7afe7305e1c502dc2c5c43632cb94e1843be065a05d3d15
+shasum -a 256 setup.sh     # expect f9f0ebed34d41e682de8dffd9f170198ab77e0a4add67a6e835492df56165313
+shasum -a 256 setup.ps1    # expect c7d2e074dabae5bcc131022906182ffd8712bb71c541ca9bdffca13b97b7700b
 ```
 
 On Windows PowerShell: `Get-FileHash setup.ps1 -Algorithm SHA256`
