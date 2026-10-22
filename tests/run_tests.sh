@@ -266,16 +266,22 @@ else
     "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "--claim: lowercase and hyphenated code still works"
   cd "$HERE" || exit 1
 
-  # -- a failed claim must leave nothing on disk: the code is single-use, so a
-  # half-cloned directory plus a burned code leaves the candidate stuck --
+  # -- a too-early code is the ordinary case, and the clone and install now run
+  # before the claim. So the candidate waits once, and the retry at the unlock
+  # time only has to fetch the key. What matters is that the code is unspent
+  # and nothing is left in a state that blocks the retry --
   work="$TMP_ROOT/c8" && mkdir -p "$work" && cd "$work" || exit 1
   out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim TOOEARLY "$BARE_REPO" 2>&1)"
-  if [ -e "$work/fixture" ]; then
-    fail "--claim too early: must not clone before the key is in hand (found $work/fixture)"
+  if [ -d "$work/fixture/.git" ]; then
+    ok "--claim too early: leaves a ready checkout, so the retry only needs the key"
   else
-    ok "--claim too early: nothing cloned, nothing left behind"
+    fail "--claim too early: leaves a ready checkout, so the retry only needs the key"
   fi
-  assert_not_contains "$out" "Cloning into" "--claim too early: clone never started"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  assert_contains "$out" "reusing it instead of cloning again" \
+    "--claim too early: the retry reuses the checkout"
+  assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" \
+    "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "--claim too early: the retry claims the key"
   cd "$HERE" || exit 1
 
   # -- and the retry with a good code then works from the same directory --
@@ -309,18 +315,41 @@ else
   assert_contains "$out" "isn't a git clone" "a non-clone directory in the way is explained"
   cd "$HERE" || exit 1
 
-  # -- a failed dependency install must not lose the fetched key: the claim
-  # code is single-use, so losing it here means the candidate can't retry --
+  # -- a failed dependency install must not spend the claim code. The install
+  # runs before the claim, so a failure there leaves the code untouched and
+  # the retry can still use it. This is what keeps a failed install a
+  # retryable annoyance rather than a call to the interviewer mid-interview --
   work="$TMP_ROOT/c12" && mkdir -p "$work" && cd "$work" || exit 1
   # uv withheld, against a repo that needs it, so the install step fails.
   out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path 'uv')" \
     bash "$SETUP" --claim GOODCODE "$BARE_REPO_NEEDS_UV" 2>&1 || true)"
-  if grep -q "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "$work/fixture-uv/.env" 2>/dev/null; then
-    ok "failed install still leaves the fetched key in .env (code not wasted)"
-  else
-    fail "failed install still leaves the fetched key in .env (code not wasted)"
-    echo "---- output ----"; echo "$out" | tail -5; echo "----------------"
-  fi
+  assert_not_contains "$out" "Fetching your API key" \
+    "failed install never reaches the claim (code not spent)"
+  # and the retry, with uv available, takes the key the first run never claimed
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \
+    bash "$SETUP" --claim GOODCODE "$BARE_REPO_NEEDS_UV" 2>&1 || true)"
+  assert_contains "$(cat "$work/fixture-uv/.env" 2>/dev/null)" \
+    "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" \
+    "retry after a failed install claims the key"
+  cd "$HERE" || exit 1
+
+  # -- a key already saved on disk wins over claiming again. The code is
+  # single-use, so a second run must not spend it. This is the failure that
+  # interrupted a live interview: setup failed after a successful claim, and
+  # re-running the whole command threw away the key it had already fetched --
+  work="$TMP_ROOT/c13" && mkdir -p "$work" && cd "$work" || exit 1
+  CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \
+    bash "$SETUP" --claim GOODCODE "$BARE_REPO" >/dev/null 2>&1
+  # USEDCODE answers 410. The saved key has to win before the claim is tried.
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim USEDCODE "$BARE_REPO" 2>&1)"
+  status=$?
+  assert_eq "$status" "0" "re-run with an already-spent code still succeeds"
+  assert_contains "$out" "reusing it instead of claiming again" \
+    "re-run reuses the key already saved in .env"
+  assert_not_contains "$out" "already been used" \
+    "re-run never asks the service about a spent code"
+  assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" \
+    "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "re-run keeps the saved key"
   cd "$HERE" || exit 1
 
   # -- an explicit key beats --claim, so the manual path still works --

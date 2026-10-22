@@ -148,10 +148,82 @@ have git || try_install_git || die "git is not installed. Install it from https:
 "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
   || die "Python 3.11+ is required by the interview repo."
 
+# ---------- clone ----------
+REPO_DIR="$(basename "${REPO_URL%/}")"
+REPO_DIR="${REPO_DIR%.git}"
+
+# Reuse an existing checkout so re-running works. Never deletes it - by the
+# second run it may hold your work.
+if [ -d "$REPO_DIR/.git" ]; then
+  echo "Found an existing $REPO_DIR - reusing it instead of cloning again."
+  cd "$REPO_DIR"
+elif [ -e "$REPO_DIR" ]; then
+  die "'$REPO_DIR' already exists here but isn't a git clone. Move or rename it, then re-run."
+else
+  git clone "$REPO_URL" "$REPO_DIR"
+  cd "$REPO_DIR"
+fi
+
+# ---------- repo-specific prerequisites ----------
+if [ -f pyproject.toml ]; then
+  have uv || try_install_uv || die "Please install uv (https://docs.astral.sh/uv/) and re-run."
+fi
+
+if [ "$OS" = "Linux" ] && grep -rIlq --include='*.py' -E '^\s*(import tkinter|from tkinter|import Tkinter)' . 2>/dev/null; then
+  if ! "$PY" -c 'import tkinter' >/dev/null 2>&1; then
+    echo
+    echo "This repo uses tkinter for a manual-testing tool, but it isn't available for $PY."
+    try_install_tkinter || echo "Continuing without it - install later if you need that tool."
+    echo
+  fi
+fi
+
+# ---------- install dependencies ----------
+if [ -f pyproject.toml ]; then
+  uv sync
+fi
+
 # ---------- API key ----------
-# Before the clone, on purpose: a claim code is single-use, so a bad one must
-# not leave a half-built directory behind.
+# Last, on purpose. The claim code is single-use, so everything that can fail
+# - the clone, and the dependency install above all - happens before it is
+# spent. The only step left after the claim is writing .env, a local file
+# write that effectively cannot fail, so a failed setup never costs a code
+# that cannot be used again.
+
 API_KEY="${!KEY_NAME:-}"
+
+# A key already on disk beats claiming again. The code is single-use, so a
+# second claim returns 410 and throws away a key that is already saved. Guards
+# the re-run of a first attempt that got as far as writing the key.
+if [ -z "$API_KEY" ] && [ -f ".env" ]; then
+  # Same pattern as the writer further down, so the two cannot disagree about
+  # which line holds the key.
+  SAVED_KEY="$(SETUP_KEY_NAME="$KEY_NAME" "$PY" - ".env" <<'PY' || true
+import os, re, sys
+
+name = os.environ["SETUP_KEY_NAME"]
+pat = re.compile(r"\s*(?:export\s+)?" + re.escape(name) + r"\s*=(.*)")
+
+found = ""
+with open(sys.argv[1]) as f:
+    for line in f:
+        m = pat.match(line)
+        if m:
+            found = m.group(1).strip()
+print(found)
+PY
+)"
+  # Only something that looks like a key. A placeholder or a half-written
+  # value would otherwise be reused on every run, turning a recoverable setup
+  # failure into an auth error with no way back.
+  case "$SAVED_KEY" in
+    sk-ant-*)
+      API_KEY="$SAVED_KEY"
+      echo
+      echo "Found your key already saved in .env - reusing it instead of claiming again."
+      ;;
+  esac
+fi
 
 # --claim swaps the code for the key: the service returns the key as the whole
 # body, or a message meant for you (e.g. "your key unlocks at HH:MM") on refusal.
@@ -210,25 +282,9 @@ API_KEY="$(printf '%s' "$API_KEY" | tr -d '[:space:]')"
 [ -n "$API_KEY" ] || die "No key entered. Re-run the script and paste the key when asked."
 echo "Key received (${#API_KEY} characters)."
 
-# ---------- clone ----------
-REPO_DIR="$(basename "${REPO_URL%/}")"
-REPO_DIR="${REPO_DIR%.git}"
-
-# Reuse an existing checkout so re-running works. Never deletes it - by the
-# second run it may hold your work.
-if [ -d "$REPO_DIR/.git" ]; then
-  echo "Found an existing $REPO_DIR - reusing it instead of cloning again."
-  cd "$REPO_DIR"
-elif [ -e "$REPO_DIR" ]; then
-  die "'$REPO_DIR' already exists here but isn't a git clone. Move or rename it, then re-run."
-else
-  git clone "$REPO_URL" "$REPO_DIR"
-  cd "$REPO_DIR"
-fi
-
 # ---------- .env ----------
-# Written before installing: the claim code is already spent, so a failed
-# install must not lose the key with it.
+# The last step, and the only one after the claim. Nothing that can fail may
+# be added below this point: by here the code is spent.
 if [ -f .env.example ] && [ ! -f .env ]; then
   cp .env.example .env
 elif [ ! -f .env ]; then
@@ -250,24 +306,5 @@ with open(".env", "w") as f:
     f.write("\n".join(lines) + "\n")
 PY
 chmod 600 .env 2>/dev/null || true
-
-# ---------- repo-specific prerequisites ----------
-if [ -f pyproject.toml ]; then
-  have uv || try_install_uv || die "Please install uv (https://docs.astral.sh/uv/) and re-run."
-fi
-
-if [ "$OS" = "Linux" ] && grep -rIlq --include='*.py' -E '^\s*(import tkinter|from tkinter|import Tkinter)' . 2>/dev/null; then
-  if ! "$PY" -c 'import tkinter' >/dev/null 2>&1; then
-    echo
-    echo "This repo uses tkinter for a manual-testing tool, but it isn't available for $PY."
-    try_install_tkinter || echo "Continuing without it - install later if you need that tool."
-    echo
-  fi
-fi
-
-# ---------- install dependencies ----------
-if [ -f pyproject.toml ]; then
-  uv sync
-fi
 
 echo "Setup complete. Project is in $(pwd)"
