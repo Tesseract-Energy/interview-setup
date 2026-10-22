@@ -91,7 +91,7 @@ git clone -q --bare "$FIXTURE_UV_SRC" "$BARE_REPO_NEEDS_UV"
 # ---------- PATH shim helper: build a PATH containing only a whitelist of ----------
 # real tools, letting us simulate "X is not installed" by omitting X.
 # All the external (non-builtin) commands setup.sh can call are listed here.
-ALL_SHIMMABLE="bash git python3 python uv curl wget grep tr basename cp touch chmod uname brew apt-get dnf pacman zypper node npm pnpm yarn ssh gh"
+ALL_SHIMMABLE="bash git python3 python uv curl wget grep tr basename cp touch chmod mkdir uname brew apt-get dnf pacman zypper node npm pnpm yarn ssh gh"
 
 make_shim_path() {
   # make_shim_path "omit1 omit2 ..." -> echoes a PATH to use
@@ -193,6 +193,9 @@ import http.server, urllib.parse, sys
 
 CASES = {
     "GOODCODE": (200, "sk-ant-api03-fetched-by-claim-code"),
+    # A later interview's code: a different key, so a test can tell which one
+    # the script ended up with.
+    "NEXTCODE": (200, "sk-ant-api03-second-interview-key"),
     "TOOEARLY": (409, "Your key unlocks at 14:55 UTC, just before your interview starts. Re-run this then.\n"),
     "USEDCODE": (410, "That claim code has already been used. If you need the key again, ask your interviewer.\n"),
     "NOSUCHCD": (404, "That claim code isn't recognised. Check it with your interviewer.\n"),
@@ -230,7 +233,7 @@ else
 
   # -- happy path: key fetched, written to .env, nothing pasted --
   work="$TMP_ROOT/c1" && mkdir -p "$work" && cd "$work" || exit 1
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
   status=$?
   assert_eq "$status" "0" "--claim: exits 0 on a valid code"
   assert_contains "$out" "Key received automatically" "--claim: says the key came automatically"
@@ -241,7 +244,7 @@ else
 
   # -- the case this was built for: candidate runs setup before the window --
   work="$TMP_ROOT/c2" && mkdir -p "$work" && cd "$work" || exit 1
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim TOOEARLY "$BARE_REPO" 2>&1)"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim TOOEARLY "$BARE_REPO" 2>&1)"
   status=$?
   assert_eq "$status" "1" "--claim too early: exits non-zero"
   assert_contains "$out" "Your key unlocks at 14:55 UTC" "--claim too early: shows the unlock time from the service"
@@ -250,18 +253,18 @@ else
 
   # -- already used / unrecognised: the service's wording is passed through --
   work="$TMP_ROOT/c3" && mkdir -p "$work" && cd "$work" || exit 1
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim USEDCODE "$BARE_REPO" 2>&1)"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim USEDCODE "$BARE_REPO" 2>&1)"
   assert_contains "$out" "already been used" "--claim used: passes the service's message through"
   cd "$HERE" || exit 1
 
   work="$TMP_ROOT/c4" && mkdir -p "$work" && cd "$work" || exit 1
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim NOSUCHCD "$BARE_REPO" 2>&1)"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim NOSUCHCD "$BARE_REPO" 2>&1)"
   assert_contains "$out" "isn't recognised" "--claim unknown: passes the service's message through"
   cd "$HERE" || exit 1
 
   # -- lowercase/hyphenated as a candidate would actually type it --
   work="$TMP_ROOT/c5" && mkdir -p "$work" && cd "$work" || exit 1
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim "good-code" "$BARE_REPO" 2>&1)"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim "good-code" "$BARE_REPO" 2>&1)"
   assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" \
     "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "--claim: lowercase and hyphenated code still works"
   cd "$HERE" || exit 1
@@ -271,13 +274,13 @@ else
   # time only has to fetch the key. What matters is that the code is unspent
   # and nothing is left in a state that blocks the retry --
   work="$TMP_ROOT/c8" && mkdir -p "$work" && cd "$work" || exit 1
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim TOOEARLY "$BARE_REPO" 2>&1)"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim TOOEARLY "$BARE_REPO" 2>&1)"
   if [ -d "$work/fixture/.git" ]; then
     ok "--claim too early: leaves a ready checkout, so the retry only needs the key"
   else
     fail "--claim too early: leaves a ready checkout, so the retry only needs the key"
   fi
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
   assert_contains "$out" "reusing it instead of cloning again" \
     "--claim too early: the retry reuses the checkout"
   assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" \
@@ -286,8 +289,8 @@ else
 
   # -- and the retry with a good code then works from the same directory --
   work="$TMP_ROOT/c9" && mkdir -p "$work" && cd "$work" || exit 1
-  CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim NOSUCHCD "$BARE_REPO" >/dev/null 2>&1
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim NOSUCHCD "$BARE_REPO" >/dev/null 2>&1
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
   assert_contains "$out" "Setup complete" "retry after a failed claim succeeds"
   assert_not_contains "$out" "already exists" "retry after a failed claim: no 'already exists' error"
   assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" \
@@ -296,9 +299,9 @@ else
 
   # -- re-running over an existing clone reuses it instead of dying --
   work="$TMP_ROOT/c10" && mkdir -p "$work" && cd "$work" || exit 1
-  CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" >/dev/null 2>&1
+  CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" >/dev/null 2>&1
   echo "candidate work in progress" > "$work/fixture/MY_NOTES.txt"
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
   assert_contains "$out" "reusing it instead of cloning again" "second run reuses the existing clone"
   assert_contains "$out" "Setup complete" "second run completes"
   if [ -f "$work/fixture/MY_NOTES.txt" ]; then
@@ -311,7 +314,7 @@ else
   # -- a non-clone directory in the way gets a clear message, not a git error --
   work="$TMP_ROOT/c11" && mkdir -p "$work/fixture" && cd "$work" || exit 1
   echo "not a clone" > "$work/fixture/stray.txt"
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
   assert_contains "$out" "isn't a git clone" "a non-clone directory in the way is explained"
   cd "$HERE" || exit 1
 
@@ -321,42 +324,66 @@ else
   # retryable annoyance rather than a call to the interviewer mid-interview --
   work="$TMP_ROOT/c12" && mkdir -p "$work" && cd "$work" || exit 1
   # uv withheld, against a repo that needs it, so the install step fails.
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path 'uv')" \
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path 'uv')" \
     bash "$SETUP" --claim GOODCODE "$BARE_REPO_NEEDS_UV" 2>&1 || true)"
   assert_not_contains "$out" "Fetching your API key" \
     "failed install never reaches the claim (code not spent)"
   # and the retry, with uv available, takes the key the first run never claimed
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" \
     bash "$SETUP" --claim GOODCODE "$BARE_REPO_NEEDS_UV" 2>&1 || true)"
   assert_contains "$(cat "$work/fixture-uv/.env" 2>/dev/null)" \
     "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" \
     "retry after a failed install claims the key"
   cd "$HERE" || exit 1
 
-  # -- a key already saved on disk wins over claiming again. The code is
-  # single-use, so a second run must not spend it. This is the failure that
-  # interrupted a live interview: setup failed after a successful claim, and
-  # re-running the whole command threw away the key it had already fetched --
+  # -- the failure that interrupted a live interview: setup failed after the
+  # claim had already succeeded, so re-running the command spent the
+  # single-use code a second time and got a 410, while a working key sat on
+  # disk. The re-run must not reach the service at all - so this points it at
+  # a dead port, where any call would fail loudly rather than silently pass --
   work="$TMP_ROOT/c13" && mkdir -p "$work" && cd "$work" || exit 1
-  CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \
+  CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" \
     bash "$SETUP" --claim GOODCODE "$BARE_REPO" >/dev/null 2>&1
-  # USEDCODE answers 410. The saved key has to win before the claim is tried.
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" bash "$SETUP" --claim USEDCODE "$BARE_REPO" 2>&1)"
+  out="$(CLAIM_URL="http://127.0.0.1:1/" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" \
+    bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
   status=$?
-  assert_eq "$status" "0" "re-run with an already-spent code still succeeds"
-  assert_contains "$out" "reusing it instead of claiming again" \
-    "re-run reuses the key already saved in .env"
-  assert_not_contains "$out" "already been used" \
-    "re-run never asks the service about a spent code"
+  assert_eq "$status" "0" "re-running the same command succeeds without re-claiming"
+  assert_contains "$out" "reusing it, no need to claim again" "re-run reuses the key that code already bought"
+  assert_not_contains "$out" "Couldn't reach" "re-run makes no network call at all"
   assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" \
-    "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "re-run keeps the saved key"
+    "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "re-run keeps the key"
+  cd "$HERE" || exit 1
+
+  # -- and from a different folder, where there is no .env to fall back on.
+  # This is why the key is remembered under the code in a fixed location
+  # rather than in the checkout --
+  work2="$TMP_ROOT/c13b" && mkdir -p "$work2" && cd "$work2" || exit 1
+  out="$(CLAIM_URL="http://127.0.0.1:1/" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" \
+    bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+  assert_contains "$out" "reusing it, no need to claim again" \
+    "a re-run from another folder still finds the key that code bought"
+  assert_contains "$(cat "$work2/fixture/.env" 2>/dev/null)" \
+    "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "the other folder gets the same key"
+  cd "$HERE" || exit 1
+
+  # -- a *different* code is a different interview, and must claim its own
+  # key. Reusing the previous one would hand the candidate a key revoked
+  # minutes after that interview ended: a 401 with nothing explaining it --
+  work="$TMP_ROOT/c13c" && mkdir -p "$work" && cd "$work" || exit 1
+  CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" \
+    bash "$SETUP" --claim GOODCODE "$BARE_REPO" >/dev/null 2>&1
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" \
+    bash "$SETUP" --claim NEXTCODE "$BARE_REPO" 2>&1)"
+  assert_not_contains "$out" "no need to claim again" "a new code does not reuse the previous interview's key"
+  assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" \
+    "ANTHROPIC_API_KEY=sk-ant-api03-second-interview-key" "a new code claims and writes its own key"
   cd "$HERE" || exit 1
 
   # -- a claim code that is plainly not one is rejected before any work. The
   # claim runs last now, so without this a bad paste costs a clone and a full
   # dependency install before the service gets to say so --
   work="$TMP_ROOT/c14" && mkdir -p "$work" && cd "$work" || exit 1
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" \
     bash "$SETUP" --claim "the code from my email is GOODCODE i think" "$BARE_REPO" 2>&1 || true)"
   assert_contains "$out" "doesn't look like a claim code" "a pasted sentence is rejected as a claim code"
   assert_not_contains "$out" "Cloning into" "a rejected claim code costs no clone"
@@ -374,7 +401,7 @@ else
   git clone -q "$BARE_REPO" fixture
   printf 'SOMETHING_ELSE=keepme\n' > fixture/.env
   chmod 444 fixture/.env
-  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" \
     bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1 || true)"
   chmod 644 fixture/.env
   assert_contains "$out" "couldn't write the key" "an unwritable .env is reported, not swallowed"
@@ -384,7 +411,7 @@ else
 
   # -- an explicit key beats --claim, so the manual path still works --
   work="$TMP_ROOT/c6" && mkdir -p "$work" && cd "$work" || exit 1
-  out="$(ANTHROPIC_API_KEY=explicit-wins CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \
+  out="$(ANTHROPIC_API_KEY=explicit-wins CLAIM_URL="$CLAIM_URL_TEST" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" \
     bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
   assert_contains "$(cat "$work/fixture/.env" 2>/dev/null)" "ANTHROPIC_API_KEY=explicit-wins" \
     "--claim: an explicitly supplied key takes precedence"
@@ -396,7 +423,7 @@ fi
 
 # -- service unreachable: a clear message, not a stack trace or a hang --
 work="$TMP_ROOT/c7" && mkdir -p "$work" && cd "$work" || exit 1
-out="$(CLAIM_URL="http://127.0.0.1:1/" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
+out="$(CLAIM_URL="http://127.0.0.1:1/" XDG_CACHE_HOME="$work/cache" PATH="$(make_shim_path '')" bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1)"
 assert_contains "$out" "Couldn't reach the key service" "--claim unreachable: explains the connection failure"
 cd "$HERE" || exit 1
 

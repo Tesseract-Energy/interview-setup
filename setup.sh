@@ -42,7 +42,7 @@ while [ $# -gt 0 ]; do
              # all - a sentence, a URL, a truncated fragment. Deliberately
              # checks length only, not the service's alphabet: duplicating
              # that here would start rejecting valid codes the day it changes.
-             CLAIM_BARE="$(printf '%s' "$CLAIM_CODE" | tr -cd '[:alnum:]')"
+             CLAIM_BARE="$(printf '%s' "$CLAIM_CODE" | tr -cd '[:alnum:]' | tr '[:lower:]' '[:upper:]')"
              case "${#CLAIM_BARE}" in
                [4-9]|1[0-6]) ;;
                *) die "'$CLAIM_CODE' doesn't look like a claim code. It's the 8-character code from your setup email, e.g. ABCD-2345." ;;
@@ -59,6 +59,17 @@ KEY_NAME="${KEY_NAME:-ANTHROPIC_API_KEY}"
 CLAIM_URL="${CLAIM_URL:-https://onboarding-service-chi.vercel.app/api/claim}"
 
 [ -n "$REPO_URL" ] || { usage >&2; exit 1; }
+
+# Where a claimed key is remembered, named after the code that bought it.
+# Empty when there is nowhere sensible to put it (no HOME), which only costs
+# the re-run shortcut - the claim itself still works.
+CLAIM_CACHE=""
+if [ -n "${CLAIM_BARE:-}" ]; then
+  CLAIM_CACHE_DIR="${XDG_CACHE_HOME:-${HOME:-}/.cache}"
+  case "$CLAIM_CACHE_DIR" in
+    /*) CLAIM_CACHE="$CLAIM_CACHE_DIR/fuse-interview/$CLAIM_BARE" ;;
+  esac
+fi
 
 OS="$(uname -s)"
 case "$OS" in
@@ -207,35 +218,25 @@ fi
 
 API_KEY="${!KEY_NAME:-}"
 
-# A key already on disk beats claiming again. The code is single-use, so a
-# second claim returns 410 and throws away a key that is already saved. Guards
-# the re-run of a first attempt that got as far as writing the key.
-if [ -z "$API_KEY" ] && [ -f ".env" ]; then
-  # Same pattern as the writer further down, so the two cannot disagree about
-  # which line holds the key.
-  SAVED_KEY="$(SETUP_KEY_NAME="$KEY_NAME" "$PY" - ".env" <<'PY' || true
-import os, re, sys
-
-name = os.environ["SETUP_KEY_NAME"]
-pat = re.compile(r"\s*(?:export\s+)?" + re.escape(name) + r"\s*=(.*)")
-
-found = ""
-with open(sys.argv[1]) as f:
-    for line in f:
-        m = pat.match(line)
-        if m:
-            found = m.group(1).strip()
-print(found)
-PY
-)"
-  # Only something that looks like a key. A placeholder or a half-written
-  # value would otherwise be reused on every run, turning a recoverable setup
+# A key this code already bought beats claiming again: the code is single-use,
+# so a second claim returns 410 and throws away a key that is already in hand.
+#
+# Remembered under the code rather than in the checkout's .env, for two
+# reasons. A fixed location is found again when the candidate re-runs from a
+# different folder, where .env is not. And keying it by the code means a later
+# interview - a new code - misses and claims its own key, instead of silently
+# reusing the previous interview's, which is revoked minutes after that
+# interview ended and would fail as an unexplained 401.
+if [ -z "$API_KEY" ] && [ -n "$CLAIM_CACHE" ] && [ -f "$CLAIM_CACHE" ]; then
+  SAVED_KEY="$(tr -d '[:space:]' < "$CLAIM_CACHE" 2>/dev/null || true)"
+  # Only something that looks like a key. A truncated or half-written value
+  # would otherwise be reused on every run, turning a recoverable setup
   # failure into an auth error with no way back.
   case "$SAVED_KEY" in
     sk-ant-*)
       API_KEY="$SAVED_KEY"
       echo
-      echo "Found your key already saved in .env - reusing it instead of claiming again."
+      echo "You already claimed a key with this code - reusing it, no need to claim again."
       ;;
   esac
 fi
@@ -271,6 +272,14 @@ if [ -z "$API_KEY" ] && [ -n "$CLAIM_CODE" ]; then
       esac
       API_KEY="$CLAIM_BODY"
       echo "Key received automatically - nothing to paste."
+      # Saved before the .env write, not after: the code is spent from here
+      # on, so this is what makes a re-run free no matter what happens next.
+      # Best-effort - a home directory we cannot write to must not fail a
+      # setup that has already succeeded.
+      if [ -n "$CLAIM_CACHE" ] && mkdir -p "${CLAIM_CACHE%/*}" 2>/dev/null; then
+        chmod 700 "${CLAIM_CACHE%/*}" 2>/dev/null || true
+        ( umask 077; printf '%s\n' "$API_KEY" > "$CLAIM_CACHE" ) 2>/dev/null || true
+      fi
       ;;
     000|"")
       die "Couldn't reach the key service. Check your internet connection and re-run, or ask your interviewer for the key to paste instead."

@@ -108,6 +108,7 @@ Describe 'setup.ps1 claim flow' {
 import http.server, urllib.parse, sys
 CASES = {
     "GOODCODE": (200, "sk-ant-api03-fetched-by-claim-code"),
+    "NEXTCODE": (200, "sk-ant-api03-second-interview-key"),
     "USEDCODE": (410, "That claim code has already been used. If you need the key again, ask your interviewer.\n"),
 }
 class H(http.server.BaseHTTPRequestHandler):
@@ -148,26 +149,45 @@ http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
         New-Item -ItemType Directory -Path $work | Out-Null
         Push-Location $work
         try {
-            $r = Invoke-Setup -ScriptArgs @('-Claim', 'GOODCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl }
+            $r = Invoke-Setup -ScriptArgs @('-Claim', 'GOODCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl; XDG_CACHE_HOME = (Join-Path $work 'cache') }
             $r.Output | Should -Match 'Key received automatically'
             (Get-Content (Join-Path $work 'fixture' '.env') -Raw) | Should -Match 'ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code'
         } finally { Pop-Location }
     }
 
-    It 're-running with an already-spent code reuses the saved key instead of dying' {
+    It 're-running the same command reuses the key rather than re-claiming' {
         # The failure this was built for: setup failed after a successful
-        # claim, so re-running the whole command spent the single-use code a
-        # second time and got a 410 - while a working key sat in .env.
+        # claim, so re-running spent the single-use code again and got a 410
+        # while a working key sat on disk. The re-run must not reach the
+        # service at all, so it is pointed at a dead port.
         $work = Join-Path $TmpRoot 'claim2'
         New-Item -ItemType Directory -Path $work | Out-Null
+        $cache = Join-Path $work 'cache'
         Push-Location $work
         try {
-            $null = Invoke-Setup -ScriptArgs @('-Claim', 'GOODCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl }
-            $r = Invoke-Setup -ScriptArgs @('-Claim', 'USEDCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl }
+            $null = Invoke-Setup -ScriptArgs @('-Claim', 'GOODCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl; XDG_CACHE_HOME = $cache }
+            $r = Invoke-Setup -ScriptArgs @('-Claim', 'GOODCODE', $BareRepo) -Env @{ CLAIM_URL = 'http://127.0.0.1:1/'; XDG_CACHE_HOME = $cache }
             $r.Exit | Should -Be 0
-            $r.Output | Should -Match 'reusing it instead of claiming again'
-            $r.Output | Should -Not -Match 'already been used'
+            $r.Output | Should -Match 'no need to claim again'
+            $r.Output | Should -Not -Match "Couldn't reach"
             (Get-Content (Join-Path $work 'fixture' '.env') -Raw) | Should -Match 'ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code'
+        } finally { Pop-Location }
+    }
+
+    It 'a later interview uses a new code, so it claims its own key' {
+        # Reusing the previous interview's key would hand the candidate one
+        # deactivated minutes after that interview ended - a 401 with nothing
+        # explaining it. The code is the only thing naming which interview
+        # this run is for.
+        $work = Join-Path $TmpRoot 'claim4'
+        New-Item -ItemType Directory -Path $work | Out-Null
+        $cache = Join-Path $work 'cache'
+        Push-Location $work
+        try {
+            $null = Invoke-Setup -ScriptArgs @('-Claim', 'GOODCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl; XDG_CACHE_HOME = $cache }
+            $r = Invoke-Setup -ScriptArgs @('-Claim', 'NEXTCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl; XDG_CACHE_HOME = $cache }
+            $r.Output | Should -Not -Match 'no need to claim again'
+            (Get-Content (Join-Path $work 'fixture' '.env') -Raw) | Should -Match 'ANTHROPIC_API_KEY=sk-ant-api03-second-interview-key'
         } finally { Pop-Location }
     }
 
@@ -176,7 +196,7 @@ http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
         New-Item -ItemType Directory -Path $work | Out-Null
         Push-Location $work
         try {
-            $r = Invoke-Setup -ScriptArgs @('-Claim', 'USEDCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl }
+            $r = Invoke-Setup -ScriptArgs @('-Claim', 'USEDCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl; XDG_CACHE_HOME = (Join-Path $work 'cache') }
             $r.Exit | Should -Be 1
             # The checkout is left ready, so the retry only has to fetch a key.
             Test-Path (Join-Path $work 'fixture' '.git') | Should -BeTrue

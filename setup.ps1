@@ -27,6 +27,30 @@ function Confirm($prompt) {
 
 $keyName = if ($env:KEY_NAME) { $env:KEY_NAME } else { 'ANTHROPIC_API_KEY' }
 
+# Normalised the same way the service does it, so the same code typed with or
+# without its hyphen names the same remembered key.
+$claimBare = if ($Claim) { ($Claim -replace '[^A-Za-z0-9]', '').ToUpperInvariant() } else { '' }
+
+# Where a claimed key is remembered, named after the code that bought it.
+# Empty when there is nowhere sensible to put it, which only costs the re-run
+# shortcut - the claim itself still works.
+$claimCache = ''
+if ($claimBare) {
+    $cacheRoot = if ($env:XDG_CACHE_HOME) { $env:XDG_CACHE_HOME }
+                 elseif ($env:LOCALAPPDATA) { $env:LOCALAPPDATA }
+                 elseif ($HOME) { Join-Path $HOME '.cache' }
+                 else { '' }
+    if ($cacheRoot) { $claimCache = Join-Path (Join-Path $cacheRoot 'fuse-interview') $claimBare }
+}
+
+if ($Claim -and ($claimBare.Length -lt 4 -or $claimBare.Length -gt 16)) {
+    # The claim runs after the clone and the install now, so a code that was
+    # never going to work would otherwise cost minutes before the service says
+    # so. Length only, not the service's alphabet: duplicating that here would
+    # start rejecting valid codes the day it changes.
+    Fail "'$Claim' doesn't look like a claim code. It's the 8-character code from your setup email, e.g. ABCD-2345."
+}
+
 if ([string]::IsNullOrWhiteSpace($RepoUrl)) {
     Write-Host "Usage:"
     Write-Host "  .\setup.ps1 <repo-url>"
@@ -101,23 +125,24 @@ if (Test-Path 'pyproject.toml') {
 # get a 410 while holding a working key on disk.
 $apiKey = [Environment]::GetEnvironmentVariable($keyName)
 
-# A key already on disk beats claiming again, so a re-run for any reason costs
-# nothing.
-if ([string]::IsNullOrWhiteSpace($apiKey) -and (Test-Path '.env')) {
-    # Same pattern as the writer below, so the two cannot disagree about
-    # which line holds the key.
-    $savedPattern = '^\s*(?:export\s+)?' + [regex]::Escape($keyName) + '\s*=(.*)$'
-    $saved = ''
-    foreach ($line in @(Get-Content -LiteralPath '.env')) {
-        if ($line -match $savedPattern) { $saved = $Matches[1].Trim() }
-    }
-    # Only something that looks like a key. A placeholder or a half-written
-    # value would otherwise be reused on every run, turning a recoverable
-    # setup failure into an auth error with no way back.
+# A key this code already bought beats claiming again: the code is single-use,
+# so a second claim returns 410 and throws away a key already in hand.
+#
+# Remembered under the code rather than in the checkout's .env, for two
+# reasons. A fixed location is found again when the candidate re-runs from a
+# different folder, where .env is not. And keying it by the code means a later
+# interview - a new code - misses and claims its own key, instead of silently
+# reusing the previous interview's, which is revoked minutes after that
+# interview ended and would fail as an unexplained 401.
+if ([string]::IsNullOrWhiteSpace($apiKey) -and $claimCache -and (Test-Path -LiteralPath $claimCache)) {
+    $saved = ((Get-Content -LiteralPath $claimCache -Raw) -replace '\s', '')
+    # Only something that looks like a key. A truncated or half-written value
+    # would otherwise be reused on every run, turning a recoverable setup
+    # failure into an auth error with no way back.
     if ($saved.StartsWith('sk-ant-')) {
         $apiKey = $saved
         Write-Host ""
-        Write-Host "Found your key already saved in .env - reusing it instead of claiming again."
+        Write-Host "You already claimed a key with this code - reusing it, no need to claim again."
     }
 }
 
@@ -171,6 +196,16 @@ if ([string]::IsNullOrWhiteSpace($apiKey) -and -not [string]::IsNullOrWhiteSpace
         }
         $apiKey = $claimBody
         Write-Host "Key received automatically - nothing to paste."
+        # Saved before the .env write, not after: the code is spent from here
+        # on, so this is what makes a re-run free whatever happens next.
+        # Best-effort - a cache we cannot write must not fail a setup that has
+        # already succeeded.
+        if ($claimCache) {
+            try {
+                $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $claimCache) -ErrorAction Stop
+                Set-Content -LiteralPath $claimCache -Value $apiKey -NoNewline -ErrorAction Stop
+            } catch { }
+        }
     } else {
         # 409 = too early, 410 = used or finished, 404 = unrecognised.
         if ([string]::IsNullOrWhiteSpace($claimBody)) {
