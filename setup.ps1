@@ -8,8 +8,6 @@
 # Non-interactive alternative: set $env:ANTHROPIC_API_KEY before running.
 # Set $env:KEY_NAME to use a different env var name (default: ANTHROPIC_API_KEY).
 #
-# -Check is a dry run: never clones, never asks for a key, never touches .env.
-# -Needs tailors which prerequisites -Check verifies (default: git,python,uv).
 param(
     [Parameter(Position = 0)][string]$RepoUrl,
     [string]$Claim
@@ -35,15 +33,7 @@ if ([string]::IsNullOrWhiteSpace($RepoUrl)) {
     exit 1
 }
 
-# ---------- install helpers (shared by -Check and the main flow) ----------
-
-function Get-PythonCommand {
-    if (Have 'py') { return 'py' }
-    if (Have 'python') { return 'python' }
-    # pwsh is cross-platform, and python3 is the usual name off Windows.
-    if (Have 'python3') { return 'python3' }
-    return $null
-}
+# ---------- install helpers ----------
 
 function Try-InstallGit {
     if (-not (Have 'winget')) {
@@ -67,11 +57,6 @@ function Try-InstallUv {
 }
 
 # ============================================================
-# -Check mode: verify, never clone/ask-for-a-key/touch .env
-# ============================================================
-
-
-# ============================================================
 # Main flow: clone, install, ask for the key, write .env
 # ============================================================
 if (-not (Have 'git')) {
@@ -80,12 +65,61 @@ if (-not (Have 'git')) {
     }
 }
 
-# ---------- API key (before the clone, on purpose) ----------
-# A claim code is single-use. Cloning first meant a wrong or too-early code
-# left a half-built directory behind, so the retry died on "destination path
-# already exists" - and with a burned code there was nothing left to retry
-# with. Nothing touches the disk until the key is in hand.
+# ---------- clone ----------
+$repoDir = [System.IO.Path]::GetFileName($RepoUrl.TrimEnd('/', '\'))
+if ($repoDir.EndsWith('.git')) { $repoDir = $repoDir.Substring(0, $repoDir.Length - 4) }
+
+# Reuse an existing checkout rather than failing. A candidate who re-runs this
+# - after a failed claim, a dropped connection, or just twice - would otherwise
+# hit "destination path already exists" and be stuck. Never deletes it: by the
+# second run it may hold their work.
+if (Test-Path (Join-Path $repoDir '.git')) {
+    Write-Host "Found an existing $repoDir - reusing it instead of cloning again."
+    Set-Location $repoDir
+} elseif (Test-Path $repoDir) {
+    Fail "'$repoDir' already exists here but isn't a git clone. Move or rename it, then re-run."
+} else {
+    git clone $RepoUrl $repoDir
+    Check-Exit "git clone"
+    Set-Location $repoDir
+}
+
+# ---------- repo-specific prerequisites + dependencies ----------
+if (Test-Path 'pyproject.toml') {
+    if (-not (Have 'uv')) {
+        if (-not (Try-InstallUv)) { Fail "Please install uv (https://docs.astral.sh/uv/) and re-run." }
+    }
+    uv sync
+    Check-Exit "uv sync"
+}
+
+# ---------- API key (last, on purpose) ----------
+# A claim code is single-use, so everything that can fail - the clone, and the
+# dependency install above all - happens before it is spent. The only step
+# left after the claim is writing .env. A candidate whose install failed after
+# claiming used to re-run the whole command, spend the code a second time and
+# get a 410 while holding a working key on disk.
 $apiKey = [Environment]::GetEnvironmentVariable($keyName)
+
+# A key already on disk beats claiming again, so a re-run for any reason costs
+# nothing.
+if ([string]::IsNullOrWhiteSpace($apiKey) -and (Test-Path '.env')) {
+    # Same pattern as the writer below, so the two cannot disagree about
+    # which line holds the key.
+    $savedPattern = '^\s*(?:export\s+)?' + [regex]::Escape($keyName) + '\s*=(.*)$'
+    $saved = ''
+    foreach ($line in @(Get-Content -LiteralPath '.env')) {
+        if ($line -match $savedPattern) { $saved = $Matches[1].Trim() }
+    }
+    # Only something that looks like a key. A placeholder or a half-written
+    # value would otherwise be reused on every run, turning a recoverable
+    # setup failure into an auth error with no way back.
+    if ($saved.StartsWith('sk-ant-')) {
+        $apiKey = $saved
+        Write-Host ""
+        Write-Host "Found your key already saved in .env - reusing it instead of claiming again."
+    }
+}
 
 # With -Claim, swap the code for the key rather than asking for a paste. The
 # service returns the key as the whole body on success and a human-readable
@@ -160,29 +194,11 @@ $apiKey = ($apiKey -replace '\s', '')
 if ([string]::IsNullOrEmpty($apiKey)) { Fail "No key entered. Re-run the script and paste the key when asked." }
 Write-Host "Key received ($($apiKey.Length) characters)."
 
-# ---------- clone ----------
-$repoDir = [System.IO.Path]::GetFileName($RepoUrl.TrimEnd('/', '\'))
-if ($repoDir.EndsWith('.git')) { $repoDir = $repoDir.Substring(0, $repoDir.Length - 4) }
-
-# Reuse an existing checkout rather than failing. A candidate who re-runs this
-# - after a failed claim, a dropped connection, or just twice - would otherwise
-# hit "destination path already exists" and be stuck. Never deletes it: by the
-# second run it may hold their work.
-if (Test-Path (Join-Path $repoDir '.git')) {
-    Write-Host "Found an existing $repoDir - reusing it instead of cloning again."
-    Set-Location $repoDir
-} elseif (Test-Path $repoDir) {
-    Fail "'$repoDir' already exists here but isn't a git clone. Move or rename it, then re-run."
-} else {
-    git clone $RepoUrl $repoDir
-    Check-Exit "git clone"
-    Set-Location $repoDir
-}
-
-# ---------- .env (before installing, on purpose) ----------
-# A claim code is single-use, so it's spent by the time we get here. If the
-# dependency install below failed first, the key would be gone with nothing
-# written, and the retry couldn't fetch it again - the candidate would need
+# ---------- .env (last, on purpose) ----------
+# The only step after the claim, and by here the code is spent. Nothing that
+# can fail may be added below this point, and a write that fails anyway has to
+# hand the key over rather than lose it - that is the one remaining way to end
+# up with a used code and no key, so it is handled rather than left to
 if ((Test-Path '.env.example') -and -not (Test-Path '.env')) {
     Copy-Item '.env.example' '.env'
 }
@@ -196,16 +212,18 @@ $kept += "$keyName=$apiKey"
 
 # UTF-8 without BOM so dotenv parsers read the first key correctly
 $utf8 = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllLines($envPath, [string[]]$kept, $utf8)
-
-
-# ---------- repo-specific prerequisites + dependencies ----------
-if (Test-Path 'pyproject.toml') {
-    if (-not (Have 'uv')) {
-        if (-not (Try-InstallUv)) { Fail "Please install uv (https://docs.astral.sh/uv/) and re-run." }
-    }
-    uv sync
-    Check-Exit "uv sync"
+try {
+    [System.IO.File]::WriteAllLines($envPath, [string[]]$kept, $utf8)
+} catch {
+    Write-Host ""
+    Write-Host "ERROR: couldn't write the key to $envPath" -ForegroundColor Red
+    Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Your claim code is already used, so here is the key itself - save it as" -ForegroundColor Yellow
+    Write-Host "$keyName in .env yourself, or tell your interviewer the write failed." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host $apiKey
+    exit 1
 }
+
 
 Write-Host "Setup complete. Project is in $((Get-Location).Path)"

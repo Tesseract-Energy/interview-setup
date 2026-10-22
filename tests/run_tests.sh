@@ -352,6 +352,36 @@ else
     "ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code" "re-run keeps the saved key"
   cd "$HERE" || exit 1
 
+  # -- a claim code that is plainly not one is rejected before any work. The
+  # claim runs last now, so without this a bad paste costs a clone and a full
+  # dependency install before the service gets to say so --
+  work="$TMP_ROOT/c14" && mkdir -p "$work" && cd "$work" || exit 1
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \
+    bash "$SETUP" --claim "the code from my email is GOODCODE i think" "$BARE_REPO" 2>&1 || true)"
+  assert_contains "$out" "doesn't look like a claim code" "a pasted sentence is rejected as a claim code"
+  assert_not_contains "$out" "Cloning into" "a rejected claim code costs no clone"
+  if [ -e "$work/fixture" ]; then
+    fail "a rejected claim code leaves nothing behind"
+  else
+    ok "a rejected claim code leaves nothing behind"
+  fi
+  cd "$HERE" || exit 1
+
+  # -- if .env cannot be written the key must still reach the candidate. The
+  # code is spent by then, so a silent failure here is the one path that ends
+  # with a used code and no key at all --
+  work="$TMP_ROOT/c15" && mkdir -p "$work" && cd "$work" || exit 1
+  git clone -q "$BARE_REPO" fixture
+  printf 'SOMETHING_ELSE=keepme\n' > fixture/.env
+  chmod 444 fixture/.env
+  out="$(CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \
+    bash "$SETUP" --claim GOODCODE "$BARE_REPO" 2>&1 || true)"
+  chmod 644 fixture/.env
+  assert_contains "$out" "couldn't write the key" "an unwritable .env is reported, not swallowed"
+  assert_contains "$out" "sk-ant-api03-fetched-by-claim-code" \
+    "an unwritable .env still hands the candidate the key it already claimed"
+  cd "$HERE" || exit 1
+
   # -- an explicit key beats --claim, so the manual path still works --
   work="$TMP_ROOT/c6" && mkdir -p "$work" && cd "$work" || exit 1
   out="$(ANTHROPIC_API_KEY=explicit-wins CLAIM_URL="$CLAIM_URL_TEST" PATH="$(make_shim_path '')" \

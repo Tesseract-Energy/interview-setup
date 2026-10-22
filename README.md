@@ -15,7 +15,9 @@ write `.env`, install dependencies — is about a hundred lines.
 ## Prerequisites
 
 - **git**, the scripts can offer to install it for you if it's missing
-- **Python 3.11+**
+- **Python 3** — any version, just to run the script itself. The interview
+  repo needs 3.11+, and `uv` fetches a suitable interpreter on its own if
+  your system Python is older
 - **uv** ([docs.astral.sh/uv](https://docs.astral.sh/uv/)) — only if the
   interview repo needs it; the script offers to install it for you
 - An internet connection (to clone the interview repo and reach

@@ -45,38 +45,7 @@ AfterAll {
     Remove-Item -Recurse -Force $TmpRoot -ErrorAction SilentlyContinue
 }
 
-Describe 'setup.ps1 -Check' {
-    It 'exits 0 and reports PASS for git/uv when both are present' {
-        # -Needs git,uv rather than the default (which also checks python):
-        # this test host only has `python3` on PATH, not the `py`/`python`
-        # launcher names Windows machines normally expose, so a default-needs
-        # run would show a misleading python FAIL that has nothing to do with
-        # the script's logic. The default-needs case still needs a real
-        # Windows machine - see the test plan in the project summary.
-        $r = Invoke-Setup -ScriptArgs @('-Check', '-Needs', 'git,uv')
-        $r.Output | Should -Match 'Result: ready for the interview\.'
-        $r.Exit | Should -Be 0
-    }
-
-    It 'rejects an unknown -Needs item without running any checks' {
-        $r = Invoke-Setup -ScriptArgs @('-Check', '-Needs', 'bogus')
-        $r.Exit | Should -Be 1
-        $r.Output | Should -Match "Unknown -Needs item 'bogus'"
-    }
-
-    It 'only checks the items in -Needs' {
-        $r = Invoke-Setup -ScriptArgs @('-Check', '-Needs', 'git,node')
-        $r.Output | Should -Match '\[PASS\] git'
-        $r.Output | Should -Match '\[PASS\] node'
-        $r.Output | Should -Not -Match 'python'
-        $r.Output | Should -Not -Match 'uv \('
-    }
-
-    It 'reports tkinter as not applicable on Windows-targeted logic (this host is not Windows, but the check itself is OS-gated, not host-gated)' {
-        $r = Invoke-Setup -ScriptArgs @('-Check', '-Needs', 'tkinter')
-        $r.Output | Should -Match 'tkinter check does not apply on Windows'
-    }
-
+Describe 'setup.ps1 arguments' {
     It 'prints usage and exits 1 with no arguments' {
         $r = Invoke-Setup -ScriptArgs @()
         $r.Exit | Should -Be 1
@@ -126,5 +95,93 @@ Describe 'setup.ps1 main flow' {
         } finally {
             Pop-Location
         }
+    }
+}
+
+Describe 'setup.ps1 claim flow' {
+    BeforeAll {
+        # Same stub contract as tests/run_tests.sh: the code is the whole URL
+        # query, the key is the whole body, refusals carry a human message.
+        $script:ClaimPort = 8791
+        $stub = Join-Path $TmpRoot 'claim_stub.py'
+        @'
+import http.server, urllib.parse, sys
+CASES = {
+    "GOODCODE": (200, "sk-ant-api03-fetched-by-claim-code"),
+    "USEDCODE": (410, "That claim code has already been used. If you need the key again, ask your interviewer.\n"),
+}
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        code = (q.get("code") or [""])[0].upper().replace("-", "").replace(" ", "")
+        status, body = CASES.get(code, (404, "That claim code isn't recognised.\n"))
+        payload = body.encode()
+        self.send_response(status)
+        self.send_header("content-type", "text/plain; charset=utf-8")
+        self.send_header("content-length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+'@ | Set-Content -LiteralPath $stub
+        $py = (Get-Command python3 -ErrorAction SilentlyContinue) ?? (Get-Command python -ErrorAction SilentlyContinue)
+        $script:StubProc = $null
+        if ($py) {
+            $script:StubProc = Start-Process -FilePath $py.Source -ArgumentList @($stub, "$script:ClaimPort") -PassThru
+            # Wait for it to accept connections rather than sleeping a guess.
+            foreach ($i in 1..50) {
+                try {
+                    Invoke-WebRequest -Uri "http://127.0.0.1:$script:ClaimPort/?code=GOODCODE" -UseBasicParsing -TimeoutSec 1 | Out-Null
+                    break
+                } catch { Start-Sleep -Milliseconds 100 }
+            }
+        }
+        $script:ClaimUrl = "http://127.0.0.1:$script:ClaimPort/"
+    }
+
+    AfterAll {
+        if ($script:StubProc) { Stop-Process -Id $script:StubProc.Id -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'fetches the key with a claim code and writes it to .env' {
+        $work = Join-Path $TmpRoot 'claim1'
+        New-Item -ItemType Directory -Path $work | Out-Null
+        Push-Location $work
+        try {
+            $r = Invoke-Setup -ScriptArgs @('-Claim', 'GOODCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl }
+            $r.Output | Should -Match 'Key received automatically'
+            (Get-Content (Join-Path $work 'fixture' '.env') -Raw) | Should -Match 'ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code'
+        } finally { Pop-Location }
+    }
+
+    It 're-running with an already-spent code reuses the saved key instead of dying' {
+        # The failure this was built for: setup failed after a successful
+        # claim, so re-running the whole command spent the single-use code a
+        # second time and got a 410 - while a working key sat in .env.
+        $work = Join-Path $TmpRoot 'claim2'
+        New-Item -ItemType Directory -Path $work | Out-Null
+        Push-Location $work
+        try {
+            $null = Invoke-Setup -ScriptArgs @('-Claim', 'GOODCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl }
+            $r = Invoke-Setup -ScriptArgs @('-Claim', 'USEDCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl }
+            $r.Exit | Should -Be 0
+            $r.Output | Should -Match 'reusing it instead of claiming again'
+            $r.Output | Should -Not -Match 'already been used'
+            (Get-Content (Join-Path $work 'fixture' '.env') -Raw) | Should -Match 'ANTHROPIC_API_KEY=sk-ant-api03-fetched-by-claim-code'
+        } finally { Pop-Location }
+    }
+
+    It 'clones and installs before claiming, so a refused code spends nothing' {
+        $work = Join-Path $TmpRoot 'claim3'
+        New-Item -ItemType Directory -Path $work | Out-Null
+        Push-Location $work
+        try {
+            $r = Invoke-Setup -ScriptArgs @('-Claim', 'USEDCODE', $BareRepo) -Env @{ CLAIM_URL = $script:ClaimUrl }
+            $r.Exit | Should -Be 1
+            # The checkout is left ready, so the retry only has to fetch a key.
+            Test-Path (Join-Path $work 'fixture' '.git') | Should -BeTrue
+            # And nothing was written, so no stale key can be reused later.
+            Test-Path (Join-Path $work 'fixture' '.env') | Should -BeFalse
+        } finally { Pop-Location }
     }
 }

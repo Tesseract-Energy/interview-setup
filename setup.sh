@@ -36,6 +36,17 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --claim) CLAIM_CODE="${2:-}"
              [ -n "$CLAIM_CODE" ] || die "--claim needs your claim code after it, e.g. --claim ABCD-2345"
+             # The claim now runs after the clone and the install, so a code
+             # that was never going to work costs a few minutes before the
+             # service says so. This catches the pastes that are not a code at
+             # all - a sentence, a URL, a truncated fragment. Deliberately
+             # checks length only, not the service's alphabet: duplicating
+             # that here would start rejecting valid codes the day it changes.
+             CLAIM_BARE="$(printf '%s' "$CLAIM_CODE" | tr -cd '[:alnum:]')"
+             case "${#CLAIM_BARE}" in
+               [4-9]|1[0-6]) ;;
+               *) die "'$CLAIM_CODE' doesn't look like a claim code. It's the 8-character code from your setup email, e.g. ABCD-2345." ;;
+             esac
              shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) die "Unknown option: $1 (see: bash $0 --help)" ;;
@@ -144,9 +155,13 @@ try_install_uv() {
 # Main flow: clone, install, ask for the key, write .env
 # ============================================================
 have git || try_install_git || die "git is not installed. Install it from https://git-scm.com/downloads and re-run."
-[ -n "$PY" ] || die "Python 3 is not installed. Install Python 3.11+ from https://www.python.org/downloads/ and re-run."
-"$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
-  || die "Python 3.11+ is required by the interview repo."
+# Only that *a* Python 3 exists. This script uses it for one small .env edit
+# (os and re, fine on 3.6+). The interview repo's own >=3.11 floor belongs to
+# uv, which resolves an interpreter from requires-python and downloads a
+# suitable one when none is installed - so testing the *system* interpreter
+# here can only reject candidates uv would have served. 273a545 added that
+# gate so --check could warn days early; a4e32bb removed --check.
+[ -n "$PY" ] || die "Python 3 is not installed. Install it from https://www.python.org/downloads/ and re-run."
 
 # ---------- clone ----------
 REPO_DIR="$(basename "${REPO_URL%/}")"
@@ -291,8 +306,13 @@ elif [ ! -f .env ]; then
   touch .env
 fi
 
-# The key goes to Python through the environment, never the command line
-SETUP_KEY_NAME="$KEY_NAME" SETUP_KEY_VALUE="$API_KEY" "$PY" - <<'PY'
+# The key goes to Python through the environment, never the command line.
+#
+# Printed on failure, and only on failure: the code is spent by now, so a
+# write that fails (full disk, read-only checkout) would otherwise leave the
+# candidate with a used code and no key at all - the one remaining way to end
+# up stuck. Putting it on screen is worse than .env and far better than gone.
+if ! SETUP_KEY_NAME="$KEY_NAME" SETUP_KEY_VALUE="$API_KEY" "$PY" - <<'PY'
 import os, re
 
 name, value = os.environ["SETUP_KEY_NAME"], os.environ["SETUP_KEY_VALUE"]
@@ -305,6 +325,15 @@ lines.append(f"{name}={value}")
 with open(".env", "w") as f:
     f.write("\n".join(lines) + "\n")
 PY
+then
+  echo >&2
+  echo "ERROR: couldn't write the key to $(pwd)/.env" >&2
+  echo "Your claim code is already used, so here is the key itself - save it as" >&2
+  echo "$KEY_NAME in .env yourself, or tell your interviewer the write failed." >&2
+  echo >&2
+  echo "$API_KEY" >&2
+  exit 1
+fi
 chmod 600 .env 2>/dev/null || true
 
 echo "Setup complete. Project is in $(pwd)"
