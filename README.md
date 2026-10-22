@@ -40,18 +40,6 @@ to one fixed commit, so what you read is exactly what the command below runs:
 **Download, read, then run** — drop the `&& bash ...` half of the command,
 open the file in any editor, and run it yourself when you're satisfied.
 
-**Check what you downloaded is what we published.** If these don't match, do
-not run it — tell your interviewer. (A corporate proxy that rewrites downloads
-is a more likely cause than anything sinister, but either way it's worth
-knowing.)
-
-```bash
-shasum -a 256 setup.sh     # expect f9f0ebed34d41e682de8dffd9f170198ab77e0a4add67a6e835492df56165313
-shasum -a 256 setup.ps1    # expect c7d2e074dabae5bcc131022906182ffd8712bb71c541ca9bdffca13b97b7700b
-```
-
-On Windows PowerShell: `Get-FileHash setup.ps1 -Algorithm SHA256`
-
 ## Running it, once you've accepted the repo invite
 
 One command. Substitute the **claim code** and the **interview repo URL** you
