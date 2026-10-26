@@ -56,7 +56,7 @@ done
 
 KEY_NAME="${KEY_NAME:-ANTHROPIC_API_KEY}"
 # Overridable so tests can point at a local instance.
-CLAIM_URL="${CLAIM_URL:-https://onboarding-service-chi.vercel.app/api/claim}"
+CLAIM_URL="${CLAIM_URL:-https://senat-api.onrender.com/interview-claim}"
 
 [ -n "$REPO_URL" ] || { usage >&2; exit 1; }
 
@@ -249,9 +249,11 @@ if [ -z "$API_KEY" ] && [ -n "$CLAIM_CODE" ]; then
   echo "Fetching your API key with claim code $CLAIM_CODE ..."
 
   # No -f (it discards the 4xx body, which carries the explanation); status is
-  # appended as a trailing line. --data-urlencode so odd characters are safe.
+  # appended as a trailing line. The code travels in a header, not the query
+  # string: it is a credential, and a query string is written verbatim into
+  # access logs and error reports along the way.
   CLAIM_RESPONSE="$(curl -sS -w $'\n%{http_code}' --max-time 30 \
-    --get --data-urlencode "code=${CLAIM_CODE}" \
+    -H "X-Claim-Code: ${CLAIM_CODE}" \
     "$CLAIM_URL" 2>/dev/null || true)"
 
   CLAIM_STATUS="${CLAIM_RESPONSE##*$'\n'}"

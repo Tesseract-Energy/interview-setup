@@ -154,8 +154,8 @@ if ([string]::IsNullOrWhiteSpace($apiKey) -and $claimCache -and (Test-Path -Lite
 if ([string]::IsNullOrWhiteSpace($apiKey) -and -not [string]::IsNullOrWhiteSpace($Claim)) {
     Write-Host ""
     Write-Host "Fetching your API key with claim code $Claim ..."
-    $claimUrl = if ($env:CLAIM_URL) { $env:CLAIM_URL } else { 'https://onboarding-service-chi.vercel.app/api/claim' }
-    $uri = "$claimUrl`?code=$([Uri]::EscapeDataString($Claim))"
+    $claimUrl = if ($env:CLAIM_URL) { $env:CLAIM_URL } else { 'https://senat-api.onrender.com/interview-claim' }
+    $uri = $claimUrl
 
     # No -SkipHttpErrorCheck: that's PowerShell 7+ only, and the README tells
     # candidates to run this with `powershell` (Windows PowerShell 5.1), where
@@ -165,7 +165,7 @@ if ([string]::IsNullOrWhiteSpace($apiKey) -and -not [string]::IsNullOrWhiteSpace
     $claimStatus = 0
     $claimBody = ''
     try {
-        $resp = Invoke-WebRequest -Uri $uri -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
+        $resp = Invoke-WebRequest -Uri $uri -Headers @{ 'X-Claim-Code' = $Claim } -TimeoutSec 30 -UseBasicParsing -ErrorAction Stop
         $claimStatus = [int]$resp.StatusCode
         $claimBody = $resp.Content
     } catch {
