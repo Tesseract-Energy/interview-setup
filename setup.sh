@@ -1,47 +1,50 @@
 #!/usr/bin/env bash
-# Usage: bash setup.sh <repo-url>
+# Usage: bash setup.sh --claim ABCD-2345 [project-dir]
 #
-# Clones the repo, checks/installs prerequisites, installs dependencies, then
-# asks you to paste the API key (input is hidden) and writes it to .env.
+# Two jobs, in this order: install the project's dependencies, then exchange
+# your claim code for an API key and write it to .env.
 #
-# Or fetch the key automatically with the claim code your interviewer gave you:
-#   bash setup.sh --claim ABCD-2345 <repo-url>
+# It clones nothing and does not need git. This script ships inside the
+# interview project, so by default it sets up the folder it is sitting in - run
+# it from anywhere and it still finds the right one. Pass a directory to
+# override that.
 #
-# Non-interactive alternative: ANTHROPIC_API_KEY=... bash setup.sh <repo-url>
+# Without --claim it asks you to paste the key instead (input is hidden).
+# Non-interactive alternative: ANTHROPIC_API_KEY=... bash setup.sh
 # Set KEY_NAME to use a different env var name (default: ANTHROPIC_API_KEY).
 set -euo pipefail
 
-# ---------- helpers (needed before argument parsing can use them) ----------
 die() { echo "ERROR: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 usage() {
   cat <<'EOF'
 Usage:
-  bash setup.sh <repo-url>
+  bash setup.sh --claim CODE [project-dir]
 
-  <repo-url>        Clone this repo and set it up for the interview.
   --claim CODE      Fetch your API key automatically using the claim code
                      your interviewer gave you, instead of pasting a key.
                      The code only works from shortly before your interview
                      starts, and only once.
+  [project-dir]     The interview project folder. Defaults to the folder this
+                     script is in, which is the project itself.
 EOF
 }
 
-# ---------- argument parsing ----------
-REPO_URL=""
+# ---------- arguments ----------
+PROJECT_DIR=""
 CLAIM_CODE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --claim) CLAIM_CODE="${2:-}"
              [ -n "$CLAIM_CODE" ] || die "--claim needs your claim code after it, e.g. --claim ABCD-2345"
-             # The claim now runs after the clone and the install, so a code
-             # that was never going to work costs a few minutes before the
-             # service says so. This catches the pastes that are not a code at
-             # all - a sentence, a URL, a truncated fragment. Deliberately
-             # checks length only, not the service's alphabet: duplicating
-             # that here would start rejecting valid codes the day it changes.
+             # The claim runs after the install, so a code that was never going
+             # to work costs a few minutes before the service says so. This
+             # catches the pastes that are not a code at all - a sentence, a
+             # URL, a truncated fragment. Deliberately checks length only, not
+             # the service's alphabet: duplicating that here would start
+             # rejecting valid codes the day it changes.
              CLAIM_BARE="$(printf '%s' "$CLAIM_CODE" | tr -cd '[:alnum:]' | tr '[:lower:]' '[:upper:]')"
              case "${#CLAIM_BARE}" in
                [4-9]|1[0-6]) ;;
@@ -50,15 +53,19 @@ while [ $# -gt 0 ]; do
              shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*) die "Unknown option: $1 (see: bash $0 --help)" ;;
-    *) REPO_URL="$1"; shift ;;
+    # A URL here is an older invocation, from before the project came
+    # pre-placed. Caught by shape rather than ignored: treating it as a
+    # directory would fail several lines later as "no pyproject.toml", which
+    # says nothing about the real problem.
+    *://*|git@*)
+       die "This script no longer clones anything - the interview project is already in your folder. Re-run it as: bash setup.sh --claim YOUR-CODE" ;;
+    *) PROJECT_DIR="$1"; shift ;;
   esac
 done
 
 KEY_NAME="${KEY_NAME:-ANTHROPIC_API_KEY}"
 # Overridable so tests can point at a local instance.
-CLAIM_URL="${CLAIM_URL:-https://senat-api.onrender.com/interview-claim}"
-
-[ -n "$REPO_URL" ] || { usage >&2; exit 1; }
+CLAIM_URL="${CLAIM_URL:-https://onboarding-service-chi.vercel.app/api/claim}"
 
 # Where a claimed key is remembered, named after the code that bought it.
 # Empty when there is nowhere sensible to put it (no HOME), which only costs
@@ -71,162 +78,143 @@ if [ -n "${CLAIM_BARE:-}" ]; then
   esac
 fi
 
-OS="$(uname -s)"
-case "$OS" in
-  MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;;
-  *) IS_WINDOWS=0 ;;
-esac
-
 # Prompts read from the terminal even if stdin is a pipe (e.g. curl ... | bash)
 if [ -t 0 ]; then TTY=/dev/stdin; elif [ -r /dev/tty ]; then TTY=/dev/tty; else TTY=""; fi
 
-confirm() {
-  [ -n "$TTY" ] || return 1
-  local ans
-  read -r -p "$1 [y/N] " ans < "$TTY" || return 1
-  case "$ans" in [Yy]*) return 0 ;; *) return 1 ;; esac
-}
-
-# Best-effort Python discovery. Main flow (below) enforces that this exists
-# and is 3.11+, which the interview repo's pyproject.toml requires.
+# Used only for one small .env edit (os and re, fine on 3.6+). The project's
+# own >=3.11 floor belongs to uv, which resolves an interpreter from
+# requires-python and downloads a suitable one when none is installed - so
+# testing the *system* interpreter here could only reject candidates uv would
+# have served.
 PY="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+[ -n "$PY" ] || die "Python 3 is not installed, and this needs it to write .env. Tell your interviewer."
 
-# ---------- prerequisite installers ----------
-# Each try_install_* function explains the fix, asks before doing anything,
-# never runs sudo silently, and leaves the exact command on screen if it
-# can't (or you don't want it to) install something for you.
+# ---------- find the project ----------
+# The script ships in the project root, so its own directory is the project.
+# Taking that over the working directory means `bash /path/to/setup.sh` works
+# from anywhere, and the candidate cannot end up installing into the wrong
+# folder by having cd'd somewhere first.
+if [ -z "$PROJECT_DIR" ]; then
+  # Parameter expansion and builtins, not `dirname`: this runs before any
+  # prerequisite check, and an environment missing dirname would otherwise
+  # skip project detection silently rather than say anything.
+  case "$0" in
+    */*) SCRIPT_DIR="${0%/*}" ;;
+    *)   SCRIPT_DIR="." ;;
+  esac
+  SCRIPT_DIR="$(cd "$SCRIPT_DIR" 2>/dev/null && pwd)" || SCRIPT_DIR=""
+  # Only when it is actually the project. A copy of this script somewhere else
+  # - downloaded to a home directory, say - must still fall back to the
+  # working directory rather than insist on its own folder.
+  [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/pyproject.toml" ] && PROJECT_DIR="$SCRIPT_DIR"
+fi
 
-git_install_cmd() {
-  if   have apt-get; then echo "sudo apt-get install -y git"
-  elif have dnf;     then echo "sudo dnf install -y git"
-  elif [ "$OS" = "Darwin" ] && have brew; then echo "brew install git"
-  elif [ "$IS_WINDOWS" = 1 ] && have winget; then echo "winget install --id Git.Git -e"
-  else echo ""
-  fi
-}
+if [ -n "$PROJECT_DIR" ]; then
+  [ -d "$PROJECT_DIR" ] || die "'$PROJECT_DIR' isn't a directory. Pass the interview project folder, or run this from inside it with no argument."
+  cd "$PROJECT_DIR"
+fi
 
-try_install_git() {
-  local cmd; cmd="$(git_install_cmd)"
-  if [ -z "$cmd" ]; then
-    echo "No known installer for your platform. Install git from https://git-scm.com/downloads"
-    return 1
-  fi
-  echo "git is not installed."
-  echo "Fix: $cmd"
-  confirm "Install it now?" || return 1
-  eval "$cmd"
-  have git
-}
+# Checked before anything is installed, because every step below assumes it.
+# The common mistake is running from the parent of the project rather than the
+# project itself, so say that rather than only naming what is missing.
+if [ ! -f pyproject.toml ]; then
+  echo "No pyproject.toml in $(pwd), so this doesn't look like the interview project." >&2
+  for candidate in */pyproject.toml; do
+    [ -f "$candidate" ] || continue
+    echo "Did you mean: bash setup.sh --claim YOUR-CODE ${candidate%/pyproject.toml}" >&2
+    break
+  done
+  die "Run this from inside the interview project folder, or pass it as an argument."
+fi
 
-# uv bundles its own Python builds. We verified directly that uv-managed
-# Python on macOS already ships a working tkinter (no system Tk needed) -
-tkinter_install_cmd() {
-  if   have apt-get; then echo "sudo apt-get install -y python3-tk"
-  elif have dnf;     then echo "sudo dnf install -y python3-tkinter"
-  elif have pacman;  then echo "sudo pacman -S --noconfirm tk"
-  elif have zypper;  then echo "sudo zypper install -y python3-tk"
-  else echo ""
-  fi
-}
-
-try_install_tkinter() {
-  local cmd; cmd="$(tkinter_install_cmd)"
-  if [ -z "$cmd" ]; then
-    echo "No known installer for your platform/Python."
-    echo "If you're using uv-managed Python, it already bundles a working tkinter (verified on macOS)."
-    echo "Otherwise see your distro's docs for the python3-tk / tkinter package."
-    return 1
-  fi
-  echo "tkinter is not available for $PY."
-  echo "Fix: $cmd"
-  confirm "Install it now?" || return 1
-  eval "$cmd"
-  "$PY" -c 'import tkinter' >/dev/null 2>&1
-}
-
-try_install_uv() {
-  echo "uv is required but not installed."
-  echo "Fix: curl -LsSf https://astral.sh/uv/install.sh | sh"
-  confirm "Install it now with the official installer?" || return 1
-  if [ "$IS_WINDOWS" = 1 ]; then
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
-  elif have curl; then
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-  elif have wget; then
-    wget -qO- https://astral.sh/uv/install.sh | sh
-  else
-    echo "Need curl or wget to install uv. Install uv manually: https://docs.astral.sh/uv/"
-    return 1
+# ---------- 1. dependencies ----------
+# uv is installed without asking. On a personal laptop that would be rude, but
+# this runs in a disposable interview container, and a [y/N] prompt there is
+# friction at best - and hangs the setup at worst, when there is no terminal
+# to answer it from.
+if ! have uv; then
+  have curl || die "This needs curl to install uv. Tell your interviewer."
+  echo "Installing uv (https://docs.astral.sh/uv/) ..."
+  # Guarded rather than left to `set -e`: with `pipefail` a failed download
+  # aborts the script with curl's own exit code and no message at all, which
+  # tells the candidate nothing about what to do next.
+  if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
+    die "Couldn't download uv from astral.sh - usually a network or proxy problem. Check your connection and re-run, or tell your interviewer."
   fi
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-  have uv
-}
+  have uv || die "uv installed but isn't on PATH. Open a new terminal and re-run."
+fi
 
-# ============================================================
-# Main flow: clone, install, ask for the key, write .env
-# ============================================================
-have git || try_install_git || die "git is not installed. Install it from https://git-scm.com/downloads and re-run."
-# Only that *a* Python 3 exists. This script uses it for one small .env edit
-# (os and re, fine on 3.6+). The interview repo's own >=3.11 floor belongs to
-# uv, which resolves an interpreter from requires-python and downloads a
-# suitable one when none is installed - so testing the *system* interpreter
-# here can only reject candidates uv would have served. 273a545 added that
-# gate so --check could warn days early; a4e32bb removed --check.
-[ -n "$PY" ] || die "Python 3 is not installed. Install it from https://www.python.org/downloads/ and re-run."
-
-# ---------- clone ----------
-REPO_DIR="$(basename "${REPO_URL%/}")"
-REPO_DIR="${REPO_DIR%.git}"
-
-# Reuse an existing checkout so re-running works. Never deletes it - by the
-# second run it may hold your work.
-if [ -d "$REPO_DIR/.git" ]; then
-  echo "Found an existing $REPO_DIR - reusing it instead of cloning again."
-  cd "$REPO_DIR"
-elif [ -e "$REPO_DIR" ]; then
-  die "'$REPO_DIR' already exists here but isn't a git clone. Move or rename it, then re-run."
+# --frozen, not a plain sync, when there is a lockfile: install exactly what
+# uv.lock pins and never re-resolve. Without it `uv sync` silently resolves
+# the latest versions allowed by pyproject.toml, so the interview environment
+# differs from the one the exercise was tested against - and a dependency that
+# moved under it fails as an import error mid-interview, with nothing on
+# screen connecting that to the install.
+if [ -f uv.lock ]; then
+  uv sync --frozen
 else
-  git clone "$REPO_URL" "$REPO_DIR"
-  cd "$REPO_DIR"
-fi
-
-# ---------- repo-specific prerequisites ----------
-if [ -f pyproject.toml ]; then
-  have uv || try_install_uv || die "Please install uv (https://docs.astral.sh/uv/) and re-run."
-fi
-
-if [ "$OS" = "Linux" ] && grep -rIlq --include='*.py' -E '^\s*(import tkinter|from tkinter|import Tkinter)' . 2>/dev/null; then
-  if ! "$PY" -c 'import tkinter' >/dev/null 2>&1; then
-    echo
-    echo "This repo uses tkinter for a manual-testing tool, but it isn't available for $PY."
-    try_install_tkinter || echo "Continuing without it - install later if you need that tool."
-    echo
-  fi
-fi
-
-# ---------- install dependencies ----------
-if [ -f pyproject.toml ]; then
+  # Not fatal: a candidate who can still install has a working interview. But
+  # it is said plainly, because a missing lockfile is how the environment
+  # drifts, and the interviewer needs to hear about it rather than debug an
+  # import error later.
+  echo
+  echo "WARNING: no uv.lock in $(pwd), so dependency versions are being resolved" >&2
+  echo "fresh rather than pinned. This is not the tested environment - tell your" >&2
+  echo "interviewer, and mention it if anything fails to import." >&2
+  echo
   uv sync
 fi
 
-# ---------- API key ----------
+# ---------- 1b. litellm's undeclared MCP dependency ----------
+# litellm's completion() imports its MCP handler whenever the caller passes
+# tools, and this project always passes tools. From some version after 1.104.2
+# that path imports `mcp`, which litellm declares only under its [mcp] extra -
+# so an install can satisfy every declared dependency and still be a litellm
+# that cannot complete a single call. It surfaces on the candidate's first
+# message as a ModuleNotFoundError deep inside litellm, with nothing on screen
+# connecting it to setup.
+#
+# Checked rather than installed blindly: on a correctly pinned install the
+# import already works and there is nothing to add. The probe is the exact
+# module that chain fails on - importing `mcp` directly would be wrong, since
+# the pinned litellm genuinely does not need it.
+#
+# After `uv sync`, never before: sync prunes anything absent from the lock,
+# so an install placed above it is silently undone.
+# Two probes, not one. The second alone would fire for any project without
+# litellm at all, and "repair" it by adding a dependency it never wanted.
+if uv run --no-sync python -c 'import litellm' >/dev/null 2>&1 &&
+   ! uv run --no-sync python -c 'import litellm.responses.mcp.litellm_proxy_mcp_handler' >/dev/null 2>&1; then
+  echo
+  echo "Adding litellm's MCP dependency, which litellm does not declare ..."
+  # `uv add` over `uv pip install` so it survives a later `uv sync` - a
+  # candidate who runs one by hand should not silently lose this again.
+  if ! uv add 'mcp>=2.3.0,<3'; then
+    die "Couldn't install the 'mcp' package, which this version of litellm needs to make any model call. Check your network and re-run, or tell your interviewer."
+  fi
+  uv run --no-sync python -c 'import litellm.responses.mcp.litellm_proxy_mcp_handler' >/dev/null 2>&1 \
+    || die "Installed 'mcp' but litellm still cannot load its MCP handler. Tell your interviewer - this needs a dependency fix, not a re-run."
+fi
+
+# ---------- 2. the API key ----------
 # Last, on purpose. The claim code is single-use, so everything that can fail
-# - the clone, and the dependency install above all - happens before it is
-# spent. The only step left after the claim is writing .env, a local file
-# write that effectively cannot fail, so a failed setup never costs a code
-# that cannot be used again.
+# - the dependency install above all - happens before it is spent. The only
+# step left after the claim is writing .env, a local file write that
+# effectively cannot fail, so a failed setup never costs a code that cannot be
+# used again.
 
 API_KEY="${!KEY_NAME:-}"
 
 # A key this code already bought beats claiming again: the code is single-use,
 # so a second claim returns 410 and throws away a key that is already in hand.
 #
-# Remembered under the code rather than in the checkout's .env, for two
-# reasons. A fixed location is found again when the candidate re-runs from a
-# different folder, where .env is not. And keying it by the code means a later
-# interview - a new code - misses and claims its own key, instead of silently
-# reusing the previous interview's, which is revoked minutes after that
-# interview ended and would fail as an unexplained 401.
+# Remembered under the code rather than in the project's .env, for two reasons.
+# A fixed location is found again when the candidate re-runs from a different
+# folder, where .env is not. And keying it by the code means a later interview
+# - a new code - misses and claims its own key, instead of silently reusing the
+# previous interview's, which is revoked minutes after that interview ended and
+# would fail as an unexplained 401.
 if [ -z "$API_KEY" ] && [ -n "$CLAIM_CACHE" ] && [ -f "$CLAIM_CACHE" ]; then
   SAVED_KEY="$(tr -d '[:space:]' < "$CLAIM_CACHE" 2>/dev/null || true)"
   # Only something that looks like a key. A truncated or half-written value
@@ -244,7 +232,7 @@ fi
 # --claim swaps the code for the key: the service returns the key as the whole
 # body, or a message meant for you (e.g. "your key unlocks at HH:MM") on refusal.
 if [ -z "$API_KEY" ] && [ -n "$CLAIM_CODE" ]; then
-  have curl || die "This needs curl to fetch your key. Install curl, or ask your interviewer for the key to paste instead."
+  have curl || die "This needs curl to fetch your key. Ask your interviewer for the key to paste instead."
   echo
   echo "Fetching your API key with claim code $CLAIM_CODE ..."
 
@@ -296,6 +284,9 @@ if [ -z "$API_KEY" ] && [ -n "$CLAIM_CODE" ]; then
   esac
 fi
 
+# The paste path stays as the way out when the key service is unreachable
+# mid-interview. Without it an outage ends the interview; with it the
+# interviewer can read the key out and the candidate carries on.
 if [ -z "$API_KEY" ]; then
   [ -n "$TTY" ] || die "No terminal available to ask for the key. Re-run with $KEY_NAME=... set."
   echo
@@ -320,7 +311,7 @@ fi
 # The key goes to Python through the environment, never the command line.
 #
 # Printed on failure, and only on failure: the code is spent by now, so a
-# write that fails (full disk, read-only checkout) would otherwise leave the
+# write that fails (full disk, read-only folder) would otherwise leave the
 # candidate with a used code and no key at all - the one remaining way to end
 # up stuck. Putting it on screen is worse than .env and far better than gone.
 if ! SETUP_KEY_NAME="$KEY_NAME" SETUP_KEY_VALUE="$API_KEY" "$PY" - <<'PY'
