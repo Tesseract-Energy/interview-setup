@@ -5,3 +5,7 @@
 /onboarding-automation-proposal.md
 .vercel
 .env*
+
+# Working checkouts that live alongside this repo, not part of it.
+/ai-chatbot-interview/
+/onboarding-service/
