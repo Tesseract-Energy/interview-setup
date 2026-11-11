@@ -235,6 +235,46 @@ assert_contains "$out" "Setup complete" "works with no git installed at all"
 assert_not_contains "$out" "git is not installed" "never asks for git"
 cd "$HERE" || exit 1
 
+echo "== the key in the shell, not just .env =="
+
+# -- a coding agent in the pad reads ANTHROPIC_API_KEY from the environment,
+# not from .env. The exercise expects the candidate to use AI tooling, so the
+# key has to reach the shell too --
+work="$TMP_ROOT/e1" && mkdir -p "$work/home" && cd "$work" || exit 1
+proj="$(make_project "$FIXTURE_SRC")"
+out="$(HOME="$work/home" ANTHROPIC_API_KEY=shell-key PATH="$(make_shim_path '')" bash "$SETUP" "$proj" 2>&1)"
+assert_contains "$(cat "$work/home/.bashrc" 2>/dev/null)" "export ANTHROPIC_API_KEY=shell-key" \
+  "writes the export to the shell profile"
+assert_contains "$out" "For this terminal, run:" "tells you how to get it into the terminal you are in"
+# The printed command re-reads .env rather than echoing the value, so a
+# credential never lands in the scrollback or a screen share.
+assert_not_contains "$out" "export ANTHROPIC_API_KEY=shell-key" "never prints the key itself"
+assert_contains "$out" "grep '^ANTHROPIC_API_KEY=' .env" "prints the .env-reading form instead"
+cd "$HERE" || exit 1
+
+# -- re-running replaces the line instead of stacking a second export that
+# shadows the first --
+work="$TMP_ROOT/e2" && mkdir -p "$work/home" && cd "$work" || exit 1
+proj="$(make_project "$FIXTURE_SRC")"
+printf 'export ANTHROPIC_API_KEY=stale-value
+# something else of mine
+' > "$work/home/.bashrc"
+HOME="$work/home" ANTHROPIC_API_KEY=fresh-key PATH="$(make_shim_path '')" bash "$SETUP" "$proj" >/dev/null 2>&1
+bashrc="$(cat "$work/home/.bashrc")"
+assert_contains "$bashrc" "export ANTHROPIC_API_KEY=fresh-key" "re-run writes the new value"
+assert_not_contains "$bashrc" "stale-value" "re-run drops the old one"
+assert_contains "$bashrc" "# something else of mine" "re-run keeps unrelated lines"
+assert_eq "$(printf '%s\n' "$bashrc" | grep -c ANTHROPIC_API_KEY)" "1" "exactly one export line"
+cd "$HERE" || exit 1
+
+# -- no HOME: the setup still succeeds, and says what was missed --
+work="$TMP_ROOT/e3" && mkdir -p "$work" && cd "$work" || exit 1
+proj="$(make_project "$FIXTURE_SRC")"
+out="$(env -u HOME ANTHROPIC_API_KEY=k PATH="$(make_shim_path '')" bash "$SETUP" "$proj" 2>&1)"
+assert_contains "$out" "Setup complete" "no HOME: setup still completes"
+assert_contains "$(cat "$proj/.env" 2>/dev/null)" "ANTHROPIC_API_KEY=k" "no HOME: .env is still written"
+cd "$HERE" || exit 1
+
 echo "== the lockfile ==="
 
 # -- with a uv.lock present the install must be --frozen, so the interview

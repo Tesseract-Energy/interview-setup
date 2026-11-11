@@ -338,4 +338,53 @@ then
 fi
 chmod 600 .env 2>/dev/null || true
 
+# ---------- the shell, as well as .env ----------
+# python-dotenv reads .env; a coding agent in the terminal does not. Claude
+# Code and the rest read ANTHROPIC_API_KEY from the environment, and this
+# exercise expects the candidate to use AI tooling - so a key only Python can
+# see is a broken exercise, not a minor gap. It is also what makes
+# `python eval_runner.py` work outside `uv run`.
+#
+# Written to the profile rather than exported here, because a script cannot
+# set a variable in the shell that launched it. The command for the current
+# terminal is printed at the end instead.
+#
+# Best-effort, and last: by here the claim code is spent and .env is already
+# written, so nothing below may fail the setup.
+if [ -n "${HOME:-}" ]; then
+  if SETUP_KEY_NAME="$KEY_NAME" SETUP_KEY_VALUE="$API_KEY" SETUP_PROFILE="$HOME/.bashrc" "$PY" - <<'PY'
+import os, re
+
+name, value, profile = (
+    os.environ["SETUP_KEY_NAME"],
+    os.environ["SETUP_KEY_VALUE"],
+    os.environ["SETUP_PROFILE"],
+)
+# Same strip-then-append as the .env writer, so re-running setup replaces the
+# line instead of stacking a second export that shadows the first.
+pat = re.compile(r"\s*(?:export\s+)?" + re.escape(name) + r"\s*=")
+
+try:
+    with open(profile) as f:
+        lines = [l for l in f.read().splitlines() if not pat.match(l)]
+except FileNotFoundError:
+    lines = []
+lines.append(f"export {name}={value}")
+
+with open(profile, "w") as f:
+    f.write("\n".join(lines) + "\n")
+PY
+  then
+    chmod 600 "$HOME/.bashrc" 2>/dev/null || true
+  else
+    echo "Note: couldn't write ~/.bashrc, so new terminals won't have $KEY_NAME." >&2
+  fi
+fi
+
 echo "Setup complete. Project is in $(pwd)"
+echo
+# The key is read back out of .env rather than printed, so a credential does
+# not end up in the scrollback or in a screen share.
+echo "For this terminal, run:"
+echo "  export $KEY_NAME=\$(grep '^$KEY_NAME=' .env | cut -d= -f2-)"
+echo "New terminals pick it up automatically."
